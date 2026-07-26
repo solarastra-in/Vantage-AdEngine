@@ -50,6 +50,7 @@ interface CampaignWizardModalProps {
   onClose: () => void;
   onSubmitCampaign: (campaignData: any) => void;
   onOptimizeWithAi?: (promptData: any) => Promise<any>;
+  initialAiData?: any;
 }
 
 export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
@@ -57,6 +58,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   onClose,
   onSubmitCampaign,
   onOptimizeWithAi,
+  initialAiData,
 }) => {
   if (!isOpen) return null;
 
@@ -524,6 +526,121 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   };
 
   const validationResult = validateCampaign();
+
+  // Sync AI Ad Studio / Blueprint Data into Wizard State when initialAiData is passed
+  useEffect(() => {
+    if (isOpen && initialAiData) {
+      if (initialAiData.name) {
+        setName(initialAiData.name);
+      }
+      if (initialAiData.objective) {
+        const objVal = initialAiData.objective;
+        if (['Brand Awareness', 'Lead Generation', 'E-commerce Conversions', 'App Installs', 'Website Traffic'].includes(objVal)) {
+          setObjective(objVal);
+        } else {
+          setObjective('Lead Generation');
+        }
+      }
+      if (initialAiData.targetAudience) {
+        setTargetAudience(initialAiData.targetAudience);
+      }
+      if (initialAiData.headline) {
+        setHeadline(initialAiData.headline);
+      }
+      if (initialAiData.primaryText) {
+        setPrimaryText(initialAiData.primaryText);
+      }
+
+      if (initialAiData.improvedHeadlines && Array.isArray(initialAiData.improvedHeadlines) && initialAiData.improvedHeadlines.length > 0) {
+        setGoogleRsaHeadlines(initialAiData.improvedHeadlines);
+      }
+      if (initialAiData.improvedPrimaryText && Array.isArray(initialAiData.improvedPrimaryText) && initialAiData.improvedPrimaryText.length > 0) {
+        setGoogleRsaDescriptions(initialAiData.improvedPrimaryText);
+      }
+
+      const hl = initialAiData.headline || headline;
+      const pt = initialAiData.primaryText || primaryText;
+
+      setPlatformCopy({
+        meta: {
+          headline: hl.slice(0, 40),
+          primaryText: pt.slice(0, 125),
+          cta: callToAction || 'Learn More',
+        },
+        google: {
+          headline: hl.slice(0, 30),
+          primaryText: pt.slice(0, 90),
+          cta: callToAction || 'Get Started',
+        },
+        linkedin: {
+          headline: hl.slice(0, 70),
+          primaryText: pt.slice(0, 150),
+          cta: callToAction || 'Request Demo',
+        },
+        tiktok: {
+          headline: `Stop! ${hl.slice(0, 35)}`,
+          primaryText: `${pt.slice(0, 100)} #TechTok #AdGrowth`,
+          cta: 'Download App',
+        },
+        pinterest: {
+          headline: hl.slice(0, 100),
+          primaryText: pt.slice(0, 200),
+          cta: 'Visit Site',
+        },
+        x: {
+          headline: hl.slice(0, 50),
+          primaryText: `${pt.slice(0, 200)} ⚡️`,
+          cta: 'Try Free',
+        },
+        programmatic: {
+          headline: hl.slice(0, 35),
+          primaryText: pt.slice(0, 80),
+          cta: 'Launch Campaign',
+        },
+      });
+
+      if (initialAiData.recommendedBudgetDistribution && Array.isArray(initialAiData.recommendedBudgetDistribution)) {
+        const budgetMap: Record<string, number> = {};
+        initialAiData.recommendedBudgetDistribution.forEach((dist: any) => {
+          const platformNameLower = (dist.platform || '').toLowerCase();
+          let targetKey: PlatformType | null = null;
+          if (platformNameLower.includes('meta') || platformNameLower.includes('facebook') || platformNameLower.includes('instagram')) targetKey = 'meta';
+          else if (platformNameLower.includes('google') || platformNameLower.includes('youtube')) targetKey = 'google';
+          else if (platformNameLower.includes('linkedin')) targetKey = 'linkedin';
+          else if (platformNameLower.includes('tiktok')) targetKey = 'tiktok';
+          else if (platformNameLower.includes('pinterest')) targetKey = 'pinterest';
+          else if (platformNameLower.includes('x') || platformNameLower.includes('twitter')) targetKey = 'x';
+          else if (platformNameLower.includes('dsp') || platformNameLower.includes('programmatic')) targetKey = 'programmatic';
+
+          if (targetKey) {
+            budgetMap[targetKey] = dist.percent;
+          }
+        });
+
+        setSelectedChannels(prev =>
+          prev.map(ch => {
+            const pct = budgetMap[ch.platform];
+            if (pct !== undefined && pct > 0) {
+              return {
+                ...ch,
+                enabled: true,
+                budget: Math.round((totalBudget * pct) / 100),
+              };
+            } else if (pct === 0) {
+              return {
+                ...ch,
+                enabled: false,
+                budget: 0,
+              };
+            }
+            return ch;
+          })
+        );
+      }
+
+      setStep(1);
+    }
+  }, [isOpen, initialAiData]);
 
   // Load Firestore Credentials on modal mount
   useEffect(() => {
@@ -1341,6 +1458,15 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   </button>
                 )}
               </div>
+
+              {initialAiData && (
+                <div className="bg-amber-400/10 border border-amber-400/30 p-3 rounded text-xs font-mono text-amber-300 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Loaded from AI Ad Studio:</strong> Campaign topic, objective, audience targeting, headline, copy variations, and multi-channel budget allocations pre-configured.
+                  </span>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>

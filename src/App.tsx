@@ -5,6 +5,7 @@ import { LandingPage } from './components/LandingPage';
 import { SuperAdminPanel } from './components/SuperAdminPanel';
 import { CommandCenter } from './components/CommandCenter';
 import { CampaignManager } from './components/CampaignManager';
+import { MarketIntelligence } from './components/MarketIntelligence';
 import { AiAdStudio } from './components/AiAdStudio';
 import { ApiNexus } from './components/ApiNexus';
 import { FinancialLedger } from './components/FinancialLedger';
@@ -42,6 +43,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [aiWizardInitialData, setAiWizardInitialData] = useState<any>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Selected Item Modals
@@ -304,6 +306,7 @@ export function App() {
   };
 
   const handleOpenWizardWithAiData = (aiData: any) => {
+    setAiWizardInitialData(aiData);
     setIsWizardOpen(true);
   };
 
@@ -396,7 +399,10 @@ export function App() {
                 currentOrgId={currentOrgId}
                 userRole={userRole}
                 onSelectOrganization={handleSelectOrganization}
-                onOpenWizard={() => setIsWizardOpen(true)}
+                onOpenWizard={() => {
+                  setAiWizardInitialData(null);
+                  setIsWizardOpen(true);
+                }}
                 onRefreshData={() => fetchTenantData(currentOrgId)}
                 isRefreshing={isRefreshing}
                 onOpenLandingPage={() => setViewState('landing')}
@@ -417,7 +423,10 @@ export function App() {
                   channels={channels}
                   invoices={invoices}
                   timeSeries={timeSeries}
-                  onOpenWizard={() => setIsWizardOpen(true)}
+                  onOpenWizard={() => {
+                    setAiWizardInitialData(null);
+                    setIsWizardOpen(true);
+                  }}
                   onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
                   onSelectCampaign={(c) => setSelectedCampaign(c)}
                 />
@@ -426,7 +435,10 @@ export function App() {
               {activeTab === 'campaigns' && (
                 <CampaignManager
                   campaigns={campaigns}
-                  onOpenWizard={() => setIsWizardOpen(true)}
+                  onOpenWizard={() => {
+                    setAiWizardInitialData(null);
+                    setIsWizardOpen(true);
+                  }}
                   onSelectCampaign={(c) => setSelectedCampaign(c)}
                   onToggleStatus={handleToggleCampaignStatus}
                   onPublishCampaign={handlePublishCampaign}
@@ -442,7 +454,10 @@ export function App() {
                   channels={channels}
                   invoices={invoices}
                   timeSeries={timeSeries}
-                  onOpenWizard={() => setIsWizardOpen(true)}
+                  onOpenWizard={() => {
+                    setAiWizardInitialData(null);
+                    setIsWizardOpen(true);
+                  }}
                   onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
                   onSelectCampaign={(c) => setSelectedCampaign(c)}
                 />
@@ -476,7 +491,11 @@ export function App() {
       {/* Global Modals */}
       <CampaignWizardModal
         isOpen={isWizardOpen}
-        onClose={() => setIsWizardOpen(false)}
+        initialAiData={aiWizardInitialData}
+        onClose={() => {
+          setIsWizardOpen(false);
+          setAiWizardInitialData(null);
+        }}
         onSubmitCampaign={handleCreateCampaign}
         onOptimizeWithAi={handleOptimizeWithAi}
       />
