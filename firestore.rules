@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Public landing contact leads
+    match /leads/{leadId} {
+      allow create: if true;
+      allow read, update, delete: if true;
+    }
+    
+    // Multi-tenant organizations
+    match /organizations/{orgId} {
+      allow read, write: if true;
+      
+      // Tenant sub-collections (credentials, campaigns, channels, invoices, etc.)
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
+    }
+    
+    // User profile mappings
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+  }
+}

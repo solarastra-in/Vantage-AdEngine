@@ -1,0 +1,6 @@
+{
+  "name": "Vantage AdEngine",
+  "description": "Unified Cross-Channel Digital Advertising Platform with Single-Click Multi-Platform Publishing, Real-Time Performance Analytics, AI Optimization, and Payment & Invoicing Engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
