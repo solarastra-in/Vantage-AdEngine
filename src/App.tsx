@@ -12,6 +12,7 @@ import { FinancialLedger } from './components/FinancialLedger';
 import { CampaignWizardModal } from './components/CampaignWizardModal';
 import { InvoiceModal } from './components/InvoiceModal';
 import { CampaignDetailModal } from './components/CampaignDetailModal';
+import { DispatchReportBanner, DispatchReportUI } from './components/DispatchReportBanner';
 
 import { Campaign, ChannelApiStatus, Invoice, PerformanceTimePoint, PlatformType } from './types';
 import { 
@@ -55,6 +56,7 @@ export function App() {
   const [channels, setChannels] = useState<ChannelApiStatus[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [timeSeries, setTimeSeries] = useState<PerformanceTimePoint[]>([]);
+  const [activeDispatchReport, setActiveDispatchReport] = useState<DispatchReportUI | null>(null);
 
   // Monitor Firebase Auth State
   useEffect(() => {
@@ -144,32 +146,42 @@ export function App() {
   // Single-Click Cross-Platform API Dispatch
   const handlePublishCampaign = async (campaignId: string) => {
     try {
-      const res = await fetch(`/api/campaigns/${campaignId}/publish`, {
-        method: 'POST',
-      });
+      setCampaigns(prev =>
+        prev.map(c =>
+          c.id === campaignId
+            ? { ...c, status: 'publishing' as const, publishStatuses: c.channels.map(ch => ({ platform: ch.platform, status: 'publishing' as const })) }
+            : c
+        )
+      );
+
+      const res = await fetch(`/api/campaigns/${campaignId}/publish`, { method: 'POST' });
       const data = await res.json();
+
+      if (data.dispatchReport) {
+        setActiveDispatchReport(data.dispatchReport as DispatchReportUI);
+      }
 
       setCampaigns(prev =>
         prev.map(c => {
-          if (c.id === campaignId) {
-            const updated = {
-              ...c,
-              status: 'publishing' as const,
-              publishStatuses: c.channels.map(ch => ({
-                platform: ch.platform,
-                status: 'publishing' as const,
-              })),
-            };
-            saveCampaignToFirestore(currentOrgId, updated);
-            return updated;
-          }
-          return c;
+          if (c.id !== campaignId) return c;
+          const updated: Campaign = {
+            ...c,
+            status: data.status ?? c.status,
+            publishStatuses: data.dispatchReport
+              ? data.dispatchReport.results.map((r: any) => ({
+                  platform: r.platform,
+                  status:
+                    r.outcome === 'LIVE' ? 'live' : r.outcome === 'ROLLED_BACK' ? 'draft' : 'failed',
+                  externalId: r.externalId,
+                  publishedAt: r.outcome === 'LIVE' ? new Date().toISOString() : undefined,
+                  error: r.error,
+                }))
+              : c.publishStatuses,
+          };
+          saveCampaignToFirestore(currentOrgId, updated);
+          return updated;
         })
       );
-
-      setTimeout(() => {
-        fetchTenantData(currentOrgId);
-      }, 1500);
     } catch (err) {
       console.error('Publish campaign error:', err);
     }
@@ -318,6 +330,9 @@ export function App() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-stone-200 font-sans flex flex-col selection:bg-amber-400 selection:text-black">
       
+      {activeDispatchReport && (
+        <DispatchReportBanner report={activeDispatchReport} onDismiss={() => setActiveDispatchReport(null)} />
+      )}
       {/* 1. PUBLIC SAAS LANDING PAGE */}
       {viewState === 'landing' && (
         <LandingPage

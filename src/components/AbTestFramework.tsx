@@ -22,6 +22,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { AbTestConfig, AbTestVariant } from '../types';
+import { evaluateAbTest } from '../lib/statsEngine';
 
 interface AbTestFrameworkProps {
   masterHeadline: string;
@@ -206,10 +207,9 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
   const handleSimulatePerformanceTest = () => {
     setIsSimulating(true);
     setTimeout(() => {
-      const controlVariant = config.variants.find(v => v.isControl) || config.variants[0];
-      const controlConversionRate = 0.030; // 3%
+      const controlConversionRate = 0.030; // 3% baseline, synthetic traffic generator only
 
-      const simulated = config.variants.map((v) => {
+      const withSyntheticTraffic = config.variants.map((v) => {
         const trafficFactor = v.trafficAllocationPct / 100;
         const baseImpressions = Math.round((15000 + Math.random() * 10000) * trafficFactor);
         const randomCtrBoost = v.isControl ? 0 : (Math.random() * 0.02 - 0.005);
@@ -218,18 +218,24 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
         const convRate = Math.max(0.01, Math.min(0.09, controlConversionRate + (v.isControl ? 0 : (Math.random() * 0.03 - 0.008))));
         const conversions = Math.round(clicks * convRate);
         const spend = +(clicks * (1.10 + Math.random() * 0.5)).toFixed(2);
+        return { v, baseImpressions, clicks, conversions, spend, ctr };
+      });
+
+      const control = withSyntheticTraffic.find(w => w.v.isControl) ?? withSyntheticTraffic[0];
+      const significanceResults = evaluateAbTest(
+        { id: control.v.id, impressions: control.clicks, conversions: control.conversions },
+        withSyntheticTraffic
+          .filter(w => w.v.id !== control.v.id)
+          .map(w => ({ id: w.v.id, impressions: w.clicks, conversions: w.conversions }))
+      );
+
+      const simulated = withSyntheticTraffic.map(({ v, baseImpressions, clicks, conversions, spend, ctr }) => {
         const cpc = +(spend / (clicks || 1)).toFixed(2);
         const cpa = +(spend / (conversions || 1)).toFixed(2);
         const roas = +((conversions * 140) / (spend || 1)).toFixed(2);
-
-        // Calculate Lift vs Control
         const lift = v.isControl ? 0 : +(((conversions / (clicks || 1) - controlConversionRate) / controlConversionRate) * 100).toFixed(1);
-        const conf = v.isControl ? 100 : Math.min(99.9, +(82 + Math.random() * 17.5).toFixed(1));
 
-        let status: 'leading' | 'losing' | 'control' | 'inconclusive' = 'inconclusive';
-        if (v.isControl) status = 'control';
-        else if (lift > 10 && conf >= 90) status = 'leading';
-        else if (lift < -5) status = 'losing';
+        const sig = significanceResults.find(r => r.variantId === v.id)!;
 
         return {
           ...v,
@@ -242,10 +248,12 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
             cpc,
             cpa,
             roas,
-            confidenceScorePct: conf,
+            confidenceScorePct: +sig.confidencePct.toFixed(1),
             conversionLiftPct: lift,
+            hasEnoughSample: sig.hasEnoughSample,
+            minimumSampleRequired: sig.minimumSampleRequired,
           },
-          status,
+          status: sig.status,
         };
       });
 

@@ -46,6 +46,8 @@ export interface AbTestVariant {
     roas: number;
     confidenceScorePct: number;
     conversionLiftPct: number;
+    hasEnoughSample?: boolean;
+    minimumSampleRequired?: number;
   };
   status: 'leading' | 'losing' | 'control' | 'inconclusive';
 }

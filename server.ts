@@ -4,6 +4,13 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { INITIAL_CAMPAIGNS, INITIAL_CHANNELS, INITIAL_INVOICES, INITIAL_TIME_SERIES } from './src/data/initialData';
 import { Campaign, ChannelApiStatus, Invoice, PlatformType } from './src/types';
+import { encryptSecret, decryptSecret } from './src/lib/vaultCrypto.server';
+import { dispatchCampaign } from './src/lib/campaignDispatchEngine';
+import { registerAllAdapters } from './src/lib/adapters';
+import { computeBudgetReallocation } from './src/lib/budgetOptimizer';
+import { evaluateAbTest } from './src/lib/statsEngine';
+
+registerAllAdapters();
 
 // In-Memory Storage
 let campaigns: Campaign[] = [...INITIAL_CAMPAIGNS];
@@ -151,8 +158,13 @@ app.delete('/api/campaigns/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// Single Click Cross-Platform Publishing API endpoint
-app.post('/api/campaigns/:id/publish', (req, res) => {
+// Single Click Cross-Platform Publishing API endpoint.
+// Runs the real transform -> validate -> dispatch -> compensate pipeline
+// (src/lib/campaignDispatchEngine.ts) instead of faking success after a
+// timeout. Without live per-platform credentials configured in
+// credentialVault, each channel dispatches through its DRY_RUN adapter,
+// which is explicitly labeled as such rather than pretending to be live.
+app.post('/api/campaigns/:id/publish', async (req, res) => {
   const campaign = campaigns.find(c => c.id === req.params.id);
   if (!campaign) {
     return res.status(404).json({ error: 'Campaign not found' });
@@ -164,31 +176,47 @@ app.post('/api/campaigns/:id/publish', (req, res) => {
     status: 'publishing',
   }));
 
-  // Simulate cross-channel API dispatch
-  setTimeout(() => {
-    campaign.status = 'active';
-    campaign.publishStatuses = campaign.channels.map(ch => ({
-      platform: ch.platform,
-      status: 'live',
-      externalId: `${ch.platform}_act_${Math.floor(100000 + Math.random() * 900000)}`,
-      publishedAt: new Date().toISOString(),
+  try {
+    const report = await dispatchCampaign(campaign, (platform) => getResolvedCredential(platform));
+
+    campaign.status = report.overallStatus === 'ALL_LIVE' ? 'active'
+      : report.overallStatus === 'PARTIAL' ? 'active'
+      : 'draft';
+
+    campaign.publishStatuses = report.results.map(r => ({
+      platform: r.platform,
+      status: r.outcome === 'LIVE' ? 'live' : r.outcome === 'ROLLED_BACK' ? 'draft' : 'failed',
+      externalId: r.externalId,
+      publishedAt: r.outcome === 'LIVE' ? new Date().toISOString() : undefined,
+      error: r.error,
     }));
 
-    // Update channels total active count
-    campaign.channels.forEach(ch => {
-      const channelObj = channels.find(c => c.platform === ch.platform);
-      if (channelObj) {
-        channelObj.activeCampaignsCount += 1;
-      }
-    });
-  }, 1200);
+    if (report.overallStatus !== 'ALL_FAILED') {
+      campaign.channels.forEach(ch => {
+        const result = report.results.find(r => r.platform === ch.platform);
+        const channelObj = channels.find(c => c.platform === ch.platform);
+        if (result?.outcome === 'LIVE' && channelObj) {
+          channelObj.activeCampaignsCount += 1;
+        }
+      });
+    }
 
-  res.json({
-    message: 'Single-click cross-platform API dispatch initiated',
-    campaignId: campaign.id,
-    targetChannels: campaign.channels.map(c => c.platformName),
-    status: 'publishing',
-  });
+    res.json({
+      message:
+        report.overallStatus === 'ALL_LIVE'
+          ? 'All channels published successfully.'
+          : report.overallStatus === 'PARTIAL'
+          ? 'Some channels published; others failed (partial mode allowed).'
+          : 'Publish failed on one or more channels; any channel that had gone live was rolled back.',
+      campaignId: campaign.id,
+      targetChannels: campaign.channels.map(c => c.platformName),
+      status: campaign.status,
+      dispatchReport: report,
+    });
+  } catch (err: any) {
+    campaign.status = 'draft';
+    res.status(500).json({ error: 'Dispatch engine error', details: err.message });
+  }
 });
 
 app.post('/api/campaigns/:id/toggle-status', (req, res) => {
@@ -199,6 +227,88 @@ app.post('/api/campaigns/:id/toggle-status', (req, res) => {
   campaign.status = campaign.status === 'active' ? 'paused' : 'active';
   res.json(campaign);
 });
+
+// In-memory encrypted credential vault (server-side only; envelopes only,
+// plaintext never persisted or returned to the client after this call).
+interface StoredCredential {
+  platform: string;
+  accountId: string;
+  environment: 'PRODUCTION' | 'SANDBOX_SIMULATED';
+  encryptedSecret: ReturnType<typeof encryptSecret>;
+  encryptedExtra?: Record<string, ReturnType<typeof encryptSecret>>;
+}
+const credentialVault: Record<string, StoredCredential> = {};
+
+app.post('/api/vault/encrypt', (req, res) => {
+  const { platform, accountId, apiKeyOrToken, extraFields, environment } = req.body as {
+    platform?: string;
+    accountId?: string;
+    apiKeyOrToken?: string;
+    extraFields?: Record<string, string>;
+    environment?: 'PRODUCTION' | 'SANDBOX_SIMULATED';
+  };
+  if (!platform || !accountId || !apiKeyOrToken) {
+    return res.status(400).json({ error: 'platform, accountId, and apiKeyOrToken are required' });
+  }
+
+  const encryptedSecret = encryptSecret(apiKeyOrToken);
+  const encryptedExtra: Record<string, ReturnType<typeof encryptSecret>> = {};
+  if (extraFields) {
+    for (const [key, value] of Object.entries(extraFields)) {
+      if (value) encryptedExtra[key] = encryptSecret(value);
+    }
+  }
+
+  credentialVault[platform] = {
+    platform,
+    accountId,
+    environment: environment ?? 'PRODUCTION',
+    encryptedSecret,
+    encryptedExtra: Object.keys(encryptedExtra).length ? encryptedExtra : undefined,
+  };
+
+  res.json({
+    platform,
+    accountId,
+    environment: credentialVault[platform].environment,
+    algorithm: encryptedSecret.algorithm,
+    fingerprint: encryptedSecret.fingerprint,
+    encryptedAt: encryptedSecret.encryptedAt,
+    extraFieldKeys: Object.keys(encryptedExtra),
+  });
+});
+
+app.delete('/api/vault/:platform', (req, res) => {
+  delete credentialVault[req.params.platform];
+  res.json({ success: true });
+});
+
+app.get('/api/vault/status', (req, res) => {
+  const status = Object.fromEntries(
+    (Object.keys(credentialVault) as string[]).map(p => [
+      p,
+      { accountId: credentialVault[p].accountId, environment: credentialVault[p].environment, connected: true },
+    ])
+  );
+  res.json(status);
+});
+
+function getResolvedCredential(platform: string): { accountId: string; secret: string; extra?: Record<string, string> } | null {
+  const stored = credentialVault[platform];
+  if (!stored) return null;
+  try {
+    const secret = decryptSecret(stored.encryptedSecret.envelope);
+    const extra: Record<string, string> = {};
+    if (stored.encryptedExtra) {
+      for (const [key, env] of Object.entries(stored.encryptedExtra)) {
+        extra[key] = decryptSecret(env.envelope);
+      }
+    }
+    return { accountId: stored.accountId, secret, extra: Object.keys(extra).length ? extra : undefined };
+  } catch {
+    return null;
+  }
+}
 
 // 3. Channels & API Nexus
 app.get('/api/channels', (req, res) => {

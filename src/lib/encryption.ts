@@ -1,12 +1,5 @@
 import { PlatformType } from '../types';
 
-export interface EncryptedKeyPayload {
-  encryptedValue: string;
-  algorithm: string;
-  keyHash: string;
-  encryptedAt: string;
-}
-
 export interface KeyValidationResult {
   isValid: boolean;
   error?: string;
@@ -15,52 +8,15 @@ export interface KeyValidationResult {
 }
 
 /**
- * Encrypts a raw API key / bearer token using pseudo-AES-256-GCM masking with SHA-256 digest hashing.
+ * NOTE: Real encryption/decryption of channel credentials happens ONLY on the
+ * server, in src/lib/vaultCrypto.server.ts (AES-256-GCM). This file used to
+ * contain a client-side "encryptApiKey"/"decryptApiKey" pair that was base64 +
+ * string-reversal labeled as AES-256-GCM -- that was not encryption and has
+ * been removed. Never reintroduce client-side "encryption" of secrets: a
+ * browser bundle can't hold a secret key, so anything done here is
+ * obfuscation, not security. Send raw credentials to the server over HTTPS
+ * and let vaultCrypto.server.ts encrypt them before they touch Firestore.
  */
-export function encryptApiKey(rawKey: string, secretSalt = 'vantage_vault_salt_2026'): EncryptedKeyPayload {
-  if (!rawKey || rawKey.trim() === '') {
-    return {
-      encryptedValue: '',
-      algorithm: 'AES-256-GCM',
-      keyHash: '',
-      encryptedAt: new Date().toISOString(),
-    };
-  }
-
-  // Generate a key hash fingerprint (e.g. 0x8a91b2c3...)
-  let hashNum = 0;
-  for (let i = 0; i < rawKey.length; i++) {
-    hashNum = (hashNum << 5) - hashNum + rawKey.charCodeAt(i);
-    hashNum |= 0;
-  }
-  const keyHash = '0x' + Math.abs(hashNum).toString(16).padStart(8, '0');
-
-  // Simple AES-256 base64 obfuscation cipher simulation for client/server vault
-  const encoded = btoa(encodeURIComponent(rawKey));
-  const encryptedValue = `ENC_AES256_${encoded.split('').reverse().join('')}`;
-
-  return {
-    encryptedValue,
-    algorithm: 'AES-256-GCM',
-    keyHash,
-    encryptedAt: new Date().toISOString(),
-  };
-}
-
-/**
- * Decrypts an encrypted API key back to plaintext.
- */
-export function decryptApiKey(encryptedValue: string): string {
-  if (!encryptedValue || !encryptedValue.startsWith('ENC_AES256_')) {
-    return encryptedValue;
-  }
-  try {
-    const rawB64 = encryptedValue.replace('ENC_AES256_', '').split('').reverse().join('');
-    return decodeURIComponent(atob(rawB64));
-  } catch {
-    return encryptedValue;
-  }
-}
 
 /**
  * Validates platform-specific API keys and account IDs for format & scope readiness.
