@@ -102,7 +102,7 @@ export function App() {
       }
     } catch (err) {
       console.error('Error fetching tenant data:', err);
-    } fontFinally: {
+    } finally {
       setIsRefreshing(false);
     }
   };
@@ -170,27 +170,29 @@ export function App() {
         setActiveDispatchReport(data.dispatchReport as DispatchReportUI);
       }
 
-      setCampaigns(prev =>
-        prev.map(c => {
-          if (c.id !== campaignId) return c;
-          const updated: Campaign = {
-            ...c,
-            status: data.status ?? c.status,
-            publishStatuses: data.dispatchReport
-              ? data.dispatchReport.results.map((r: any) => ({
-                  platform: r.platform,
-                  status:
-                    r.outcome === 'LIVE' ? 'live' : r.outcome === 'ROLLED_BACK' ? 'draft' : 'failed',
-                  externalId: r.externalId,
-                  publishedAt: r.outcome === 'LIVE' ? new Date().toISOString() : undefined,
-                  error: r.error,
-                }))
-              : c.publishStatuses,
-          };
-          saveCampaignToFirestore(currentOrgId, updated);
-          return updated;
-        })
-      );
+      const targetCmp = campaigns.find(c => c.id === campaignId);
+      if (targetCmp) {
+        const updatedCampaignToSave: Campaign = {
+          ...targetCmp,
+          status: data.status ?? targetCmp.status,
+          publishStatuses: data.dispatchReport
+            ? data.dispatchReport.results.map((r: any) => ({
+                platform: r.platform,
+                status:
+                  r.outcome === 'LIVE' ? 'live' : r.outcome === 'ROLLED_BACK' ? 'draft' : 'failed',
+                externalId: r.externalId,
+                publishedAt: r.outcome === 'LIVE' ? new Date().toISOString() : undefined,
+                error: r.error,
+              }))
+            : targetCmp.publishStatuses,
+        };
+
+        setCampaigns(prev =>
+          prev.map(c => (c.id === campaignId ? updatedCampaignToSave : c))
+        );
+
+        await saveCampaignToFirestore(currentOrgId, updatedCampaignToSave);
+      }
     } catch (err) {
       console.error('Publish campaign error:', err);
     }
@@ -202,78 +204,74 @@ export function App() {
       const target = campaigns.find(c => c.id === campaignId);
       if (!target) return;
       const newStatus = target.status === 'active' ? 'paused' : 'active';
+      const updated = { ...target, status: newStatus as any };
 
       setCampaigns(prev =>
-        prev.map(c => {
-          if (c.id === campaignId) {
-            const updated = { ...c, status: newStatus as any };
-            saveCampaignToFirestore(currentOrgId, updated);
-            return updated;
-          }
-          return c;
-        })
+        prev.map(c => (c.id === campaignId ? updated : c))
       );
+
+      await saveCampaignToFirestore(currentOrgId, updated);
     } catch (err) {
       console.error('Toggle status error:', err);
     }
   };
 
   // Bulk Pause Campaigns
-  const handleBulkPause = (campaignIds: string[]) => {
+  const handleBulkPause = async (campaignIds: string[]) => {
+    const targetCampaigns = campaigns.filter(c => campaignIds.includes(c.id));
+    const updatedCampaigns = targetCampaigns.map(c => ({ ...c, status: 'paused' as const }));
+
     setCampaigns(prev =>
-      prev.map(c => {
-        if (campaignIds.includes(c.id)) {
-          const updated = { ...c, status: 'paused' as const };
-          saveCampaignToFirestore(currentOrgId, updated);
-          return updated;
-        }
-        return c;
-      })
+      prev.map(c => (campaignIds.includes(c.id) ? { ...c, status: 'paused' as const } : c))
     );
+
+    for (const cmp of updatedCampaigns) {
+      await saveCampaignToFirestore(currentOrgId, cmp);
+    }
   };
 
   // Bulk Resume Campaigns
-  const handleBulkResume = (campaignIds: string[]) => {
+  const handleBulkResume = async (campaignIds: string[]) => {
+    const targetCampaigns = campaigns.filter(c => campaignIds.includes(c.id));
+    const updatedCampaigns = targetCampaigns.map(c => ({ ...c, status: 'active' as const }));
+
     setCampaigns(prev =>
-      prev.map(c => {
-        if (campaignIds.includes(c.id)) {
-          const updated = { ...c, status: 'active' as const };
-          saveCampaignToFirestore(currentOrgId, updated);
-          return updated;
-        }
-        return c;
-      })
+      prev.map(c => (campaignIds.includes(c.id) ? { ...c, status: 'active' as const } : c))
     );
+
+    for (const cmp of updatedCampaigns) {
+      await saveCampaignToFirestore(currentOrgId, cmp);
+    }
   };
 
   // Bulk Duplicate Campaigns
-  const handleBulkDuplicate = (campaignIds: string[]) => {
+  const handleBulkDuplicate = async (campaignIds: string[]) => {
     const toDuplicate = campaigns.filter(c => campaignIds.includes(c.id));
-    const newCampaigns: Campaign[] = toDuplicate.map((source, index) => {
-      const dup: Campaign = {
-        ...source,
-        id: `cmp-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 6)}`,
-        name: `${source.name} (Copy)`,
+    const newCampaigns: Campaign[] = toDuplicate.map((source, index) => ({
+      ...source,
+      id: `cmp-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 6)}`,
+      name: `${source.name} (Copy)`,
+      status: 'draft',
+      createdAt: new Date().toISOString().split('T')[0],
+      spentBudget: 0,
+      metrics: {
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+        cpc: 0,
+        roas: 0,
+      },
+      publishStatuses: source.channels.map(ch => ({
+        platform: ch.platform,
         status: 'draft',
-        createdAt: new Date().toISOString().split('T')[0],
-        spentBudget: 0,
-        metrics: {
-          impressions: 0,
-          clicks: 0,
-          conversions: 0,
-          cpc: 0,
-          roas: 0,
-        },
-        publishStatuses: source.channels.map(ch => ({
-          platform: ch.platform,
-          status: 'draft',
-        })),
-      };
-      saveCampaignToFirestore(currentOrgId, dup);
-      return dup;
-    });
+      })),
+    }));
 
     setCampaigns(prev => [...newCampaigns, ...prev]);
+
+    for (const dup of newCampaigns) {
+      await saveCampaignToFirestore(currentOrgId, dup);
+    }
   };
 
   // Test Channel API Gateway
@@ -295,38 +293,59 @@ export function App() {
     try {
       const method = 'Corporate Credit Card (Visa ****4092)';
       const hash = `0x${Math.random().toString(16).slice(2, 18)}`;
+      const nowFormatted = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+
+      const targetInvoice = invoices.find(i => i.id === invoiceId);
+      const newAuditEntry: InvoiceAuditLogEntry = {
+        id: `aud-${Date.now()}`,
+        timestamp: nowFormatted,
+        previousStatus: targetInvoice?.status || 'PENDING',
+        newStatus: 'PAID',
+        action: 'Payment Cleared & Settled',
+        paymentMethod: method,
+        txHash: hash,
+        actor: 'Finance Admin',
+        notes: 'Settled via Financial Ledger instant payout gateway',
+      };
 
       setInvoices(prev =>
         prev.map(inv => {
           if (inv.id === invoiceId) {
-            const nowFormatted = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-            const newAuditEntry: InvoiceAuditLogEntry = {
-              id: `aud-${Date.now()}`,
-              timestamp: nowFormatted,
-              previousStatus: inv.status,
-              newStatus: 'PAID',
-              action: 'Payment Cleared & Settled',
-              paymentMethod: method,
-              txHash: hash,
-              actor: 'Finance Admin',
-              notes: 'Settled via Financial Ledger instant payout gateway',
-            };
-            const updated: Invoice = {
+            return {
               ...inv,
               status: 'PAID' as const,
               paymentMethod: method,
               txHash: hash,
               auditLog: [...(inv.auditLog || []), newAuditEntry],
             };
-            updateInvoiceStatusInFirestore(currentOrgId, invoiceId, 'PAID', method, hash);
-            return updated;
           }
           return inv;
         })
       );
+
+      await updateInvoiceStatusInFirestore(currentOrgId, invoiceId, 'PAID', method, hash);
     } catch (err) {
       console.error('Pay invoice error:', err);
     }
+  };
+
+  const handleAddAuditLogEntry = (invoiceId: string, entry: Omit<InvoiceAuditLogEntry, 'id'>) => {
+    const newEntry: InvoiceAuditLogEntry = {
+      ...entry,
+      id: `aud-${Date.now()}`,
+    };
+
+    setInvoices(prev =>
+      prev.map(inv => {
+        if (inv.id === invoiceId) {
+          return {
+            ...inv,
+            auditLog: [...(inv.auditLog || []), newEntry],
+          };
+        }
+        return inv;
+      })
+    );
   };
 
   // Gemini AI Helper
@@ -519,6 +538,7 @@ export function App() {
                   invoices={invoices}
                   onSelectInvoice={(inv) => setSelectedInvoice(inv)}
                   onPayInvoice={handlePayInvoice}
+                  onAddAuditLogEntry={handleAddAuditLogEntry}
                 />
               )}
             </main>

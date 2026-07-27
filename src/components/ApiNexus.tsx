@@ -261,17 +261,19 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, org
     // Refresh last checked timestamps
     const nowIso = new Date().toISOString();
     setChannelStatuses(prev => {
-      const updated = { ...prev };
-      Object.keys(updated).forEach(p => {
-        if (updated[p].status === 'HEALTHY') {
-          updated[p] = {
-            ...updated[p],
+      const next: typeof prev = {};
+      Object.keys(prev).forEach(p => {
+        if (prev[p].status === 'HEALTHY') {
+          next[p] = {
+            ...prev[p],
             latencyMs: Math.floor(Math.random() * 120) + 70,
             lastCheckedAt: nowIso,
           };
+        } else {
+          next[p] = prev[p];
         }
       });
-      return updated;
+      return next;
     });
     setIsSimulatingCheck(false);
   };

@@ -315,7 +315,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
 
             {/* Recharts Area / Bar Chart */}
             <div className="p-6 h-80">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer key={chartMetric} width="100%" height="100%">
                 {chartMetric === 'spendVsReturn' ? (
                   <AreaChart data={timeSeries} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <defs>

@@ -974,7 +974,7 @@ export const MarketIntelligence: React.FC<MarketIntelligenceProps> = ({
                           dataKey="value"
                         >
                           {donutChartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
+                            <Cell key={`cell-${entry.name || index}-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
                         <Tooltip

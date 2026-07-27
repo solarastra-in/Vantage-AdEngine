@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Invoice, InvoiceAuditLogEntry } from '../types';
 import { 
   X, 
@@ -44,34 +44,38 @@ export const InvoiceAuditLogModal: React.FC<InvoiceAuditLogModalProps> = ({
   const [customNotes, setCustomNotes] = useState('');
   const [customStatus, setCustomStatus] = useState<'DRAFT' | 'ISSUED' | 'PENDING' | 'PAID' | 'OVERDUE'>('PAID');
 
-  if (!invoice) return null;
+  const rawLogs: InvoiceAuditLogEntry[] = useMemo(() => {
+    if (!invoice) return [];
+    if (invoice.auditLog && invoice.auditLog.length > 0) {
+      return invoice.auditLog;
+    }
+    return [
+      {
+        id: `aud-default-1`,
+        timestamp: `${invoice.issuedDate} 09:00:00 UTC`,
+        previousStatus: 'DRAFT',
+        newStatus: 'ISSUED',
+        action: 'Invoice Generated & System Verified',
+        actor: 'System Automator',
+        notes: 'Invoice generated automatically upon campaign approval.',
+      },
+      {
+        id: `aud-default-2`,
+        timestamp: `${invoice.issuedDate} 09:05:00 UTC`,
+        previousStatus: 'ISSUED',
+        newStatus: invoice.status,
+        action: invoice.status === 'PAID' ? 'Payment Cleared & Settled' : 'Invoice Dispatched (Awaiting Settlement)',
+        paymentMethod: invoice.paymentMethod,
+        txHash: invoice.txHash,
+        actor: invoice.status === 'PAID' ? 'Stripe Settlement Gateway' : 'Astra Billing Engine',
+        notes: invoice.status === 'PAID' 
+          ? 'Full settlement authorized and verified.' 
+          : `Net 15 terms active. Payment due on ${invoice.dueDate}.`,
+      }
+    ];
+  }, [invoice]);
 
-  const rawLogs: InvoiceAuditLogEntry[] = invoice.auditLog && invoice.auditLog.length > 0 
-    ? invoice.auditLog 
-    : [
-        {
-          id: `aud-default-1`,
-          timestamp: `${invoice.issuedDate} 09:00:00 UTC`,
-          previousStatus: 'DRAFT',
-          newStatus: 'ISSUED',
-          action: 'Invoice Generated & System Verified',
-          actor: 'System Automator',
-          notes: 'Invoice generated automatically upon campaign approval.',
-        },
-        {
-          id: `aud-default-2`,
-          timestamp: `${invoice.issuedDate} 09:05:00 UTC`,
-          previousStatus: 'ISSUED',
-          newStatus: invoice.status,
-          action: invoice.status === 'PAID' ? 'Payment Cleared & Settled' : 'Invoice Dispatched (Awaiting Settlement)',
-          paymentMethod: invoice.paymentMethod,
-          txHash: invoice.txHash,
-          actor: invoice.status === 'PAID' ? 'Stripe Settlement Gateway' : 'Astra Billing Engine',
-          notes: invoice.status === 'PAID' 
-            ? 'Full settlement authorized and verified.' 
-            : `Net 15 terms active. Payment due on ${invoice.dueDate}.`,
-        }
-      ];
+  if (!invoice) return null;
 
   const filteredLogs = rawLogs.filter(log => {
     if (filter === 'status') return log.previousStatus !== log.newStatus;
@@ -325,7 +329,7 @@ export const InvoiceAuditLogModal: React.FC<InvoiceAuditLogModalProps> = ({
                 const isIssued = log.newStatus === 'ISSUED';
 
                 return (
-                  <div key={log.id || index} className="relative group">
+                  <div key={`log-${log.id || index}-${index}`} className="relative group">
                     
                     {/* Node Dot Icon */}
                     <div className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${

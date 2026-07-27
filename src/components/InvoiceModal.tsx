@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Invoice } from '../types';
 import { X, Printer, Download, CheckCircle2, ShieldCheck, FileText, Layers, Mail, Send, FileDown } from 'lucide-react';
-import jsPDF from 'jspdf';
 
 interface InvoiceModalProps {
   invoice: Invoice | null;
@@ -20,12 +19,15 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ invoice, onClose, on
     window.print();
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!invoice) return;
     setDownloadingPDF(true);
 
     try {
-      const doc = new jsPDF({
+      const { default: jsPDFModule, jsPDF: jsPDFClass } = await import('jspdf');
+      const jsPDFConstructor = jsPDFClass || jsPDFModule;
+
+      const doc = new jsPDFConstructor({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4',

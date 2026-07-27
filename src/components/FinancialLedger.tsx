@@ -21,53 +21,28 @@ interface FinancialLedgerProps {
   invoices: Invoice[];
   onSelectInvoice: (invoice: Invoice) => void;
   onPayInvoice: (invoiceId: string) => void;
+  onAddAuditLogEntry?: (invoiceId: string, entry: Omit<InvoiceAuditLogEntry, 'id'>) => void;
 }
 
 export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
   invoices,
   onSelectInvoice,
   onPayInvoice,
+  onAddAuditLogEntry,
 }) => {
   const [filter, setFilter] = useState<'all' | 'PAID' | 'PENDING'>('all');
-  const [auditInvoice, setAuditInvoice] = useState<Invoice | null>(null);
-  const [localInvoices, setLocalInvoices] = useState<Invoice[]>(invoices);
+  const [auditInvoiceId, setAuditInvoiceId] = useState<string | null>(null);
 
-  // Keep localInvoices in sync with prop updates
-  React.useEffect(() => {
-    setLocalInvoices(invoices);
-  }, [invoices]);
+  const selectedAuditInvoice = auditInvoiceId ? invoices.find(i => i.id === auditInvoiceId) || null : null;
 
-  const handleAddAuditLogEntry = (invoiceId: string, entry: Omit<InvoiceAuditLogEntry, 'id'>) => {
-    const newEntry: InvoiceAuditLogEntry = {
-      ...entry,
-      id: `aud-${Date.now()}`,
-    };
+  const filteredInvoices = invoices.filter(inv => filter === 'all' || inv.status === filter);
 
-    setLocalInvoices(prev =>
-      prev.map(inv => {
-        if (inv.id === invoiceId) {
-          const updated = {
-            ...inv,
-            auditLog: [...(inv.auditLog || []), newEntry],
-          };
-          if (auditInvoice?.id === invoiceId) {
-            setAuditInvoice(updated);
-          }
-          return updated;
-        }
-        return inv;
-      })
-    );
-  };
+  const totalInvoiced = invoices.reduce((acc, i) => acc + i.amount, 0);
+  const totalPaid = invoices.filter(i => i.status === 'PAID').reduce((acc, i) => acc + i.amount, 0);
+  const totalPending = invoices.filter(i => i.status === 'PENDING').reduce((acc, i) => acc + i.amount, 0);
 
-  const filteredInvoices = localInvoices.filter(inv => filter === 'all' || inv.status === filter);
-
-  const totalInvoiced = localInvoices.reduce((acc, i) => acc + i.amount, 0);
-  const totalPaid = localInvoices.filter(i => i.status === 'PAID').reduce((acc, i) => acc + i.amount, 0);
-  const totalPending = localInvoices.filter(i => i.status === 'PENDING').reduce((acc, i) => acc + i.amount, 0);
-
-  const paidCount = localInvoices.filter(i => i.status === 'PAID').length;
-  const pendingCount = localInvoices.filter(i => i.status === 'PENDING').length;
+  const paidCount = invoices.filter(i => i.status === 'PAID').length;
+  const pendingCount = invoices.filter(i => i.status === 'PENDING').length;
 
   const chartData = [
     { name: 'PAID', value: totalPaid, count: paidCount },
@@ -139,7 +114,7 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
                   dataKey="value"
                 >
                   {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`cell-${entry.name || index}-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -255,7 +230,7 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
                   </td>
                   <td className="py-3.5 px-4 text-right space-x-1.5">
                     <button
-                      onClick={() => setAuditInvoice(inv)}
+                      onClick={() => setAuditInvoiceId(inv.id)}
                       className="px-2.5 py-1 bg-amber-400/10 border border-amber-400/30 text-amber-300 hover:text-amber-200 hover:bg-amber-400/20 rounded-xs cursor-pointer text-[11px] font-mono font-bold inline-flex items-center gap-1 transition-colors"
                       title="View payment status audit log & history"
                     >
@@ -307,11 +282,11 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
       </div>
 
       {/* Invoice Audit Log Modal */}
-      {auditInvoice && (
+      {selectedAuditInvoice && (
         <InvoiceAuditLogModal
-          invoice={auditInvoice}
-          onClose={() => setAuditInvoice(null)}
-          onAddAuditLogEntry={handleAddAuditLogEntry}
+          invoice={selectedAuditInvoice}
+          onClose={() => setAuditInvoiceId(null)}
+          onAddAuditLogEntry={onAddAuditLogEntry}
           onPayInvoice={onPayInvoice}
         />
       )}
