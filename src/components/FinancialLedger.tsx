@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Invoice } from '../types';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { 
   Receipt, 
   DollarSign, 
@@ -9,7 +10,9 @@ import {
   CreditCard, 
   ShieldCheck,
   Building,
-  FileText
+  FileText,
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface FinancialLedgerProps {
@@ -31,6 +34,41 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
   const totalPaid = invoices.filter(i => i.status === 'PAID').reduce((acc, i) => acc + i.amount, 0);
   const totalPending = invoices.filter(i => i.status === 'PENDING').reduce((acc, i) => acc + i.amount, 0);
 
+  const paidCount = invoices.filter(i => i.status === 'PAID').length;
+  const pendingCount = invoices.filter(i => i.status === 'PENDING').length;
+
+  const chartData = [
+    { name: 'PAID', value: totalPaid, count: paidCount },
+    { name: 'PENDING', value: totalPending, count: pendingCount },
+  ];
+  const COLORS = ['#34d399', '#fbbf24']; // emerald-400 for PAID, amber-400 for PENDING
+
+  const handleExportCSV = () => {
+    const headers = ['Invoice ID', 'Campaign Name', 'Customer Entity', 'Customer Email', 'Status', 'Issued Date', 'Due Date', 'Media Spend ($)', 'Platform Fee ($)', 'Total Amount ($)'];
+    const rows = filteredInvoices.map(inv => [
+      `"${inv.id}"`,
+      `"${inv.campaignName.replace(/"/g, '""')}"`,
+      `"${inv.customerName.replace(/"/g, '""')}"`,
+      `"${inv.customerEmail.replace(/"/g, '""')}"`,
+      `"${inv.status}"`,
+      `"${inv.issuedDate}"`,
+      `"${inv.dueDate}"`,
+      inv.mediaSpend,
+      inv.platformFee,
+      inv.amount
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `tenant-invoices-ledger-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const channelPayouts = [
     { platform: 'Meta Suite (FB/IG)', totalDisbursed: '$85,400.00', status: 'Settled' },
     { platform: 'Google Ads & YouTube', totalDisbursed: '$110,200.00', status: 'Settled' },
@@ -44,7 +82,7 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
     <div className="p-4 sm:p-8 space-y-8 bg-[#0a0a0a] text-stone-200">
       
       {/* Header */}
-      <div className="pb-6 border-b border-stone-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="pb-6 border-b border-stone-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
         <div>
           <h1 className="text-2xl font-serif italic text-white tracking-tight">
             Financial Ledger & Media Settlement
@@ -52,6 +90,44 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
           <p className="text-stone-400 text-xs sm:text-sm font-mono mt-1">
             Customer invoicing, media budget disbursements, and channel settlement records.
           </p>
+        </div>
+
+        {/* Recharts Settlement Ratio Chart */}
+        <div className="flex items-center gap-4 bg-[#0d0d0d] border border-stone-800 p-3 rounded-sm shadow-lg self-stretch sm:self-auto">
+          <div className="w-20 h-20 shrink-0 relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={chartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={18}
+                  outerRadius={32}
+                  paddingAngle={3}
+                  dataKey="value"
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1c1917', borderColor: '#27272a', borderRadius: '2px', fontSize: '11px', color: '#f5f5f4' }}
+                  formatter={(val: number) => [`$${val.toLocaleString()}`, 'Amount']}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="text-xs font-mono space-y-1 pr-2">
+            <div className="text-[10px] uppercase text-stone-500 font-bold tracking-wider">Settlement Ratio</div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span className="text-stone-300">Paid: <strong className="text-emerald-400">${totalPaid.toLocaleString()}</strong> ({paidCount})</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span className="text-stone-300">Pending: <strong className="text-amber-400">${totalPending.toLocaleString()}</strong> ({pendingCount})</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -81,12 +157,23 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
 
       {/* Invoices List Section */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 className="text-xs uppercase tracking-[0.2em] font-bold text-stone-400">
             Customer Invoices Ledger
           </h2>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleExportCSV}
+              className="px-3 py-1 bg-stone-900 border border-stone-800 text-stone-300 hover:text-white rounded-xs cursor-pointer text-xs font-mono font-bold flex items-center gap-1.5 transition-colors"
+              title="Export invoices table as CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              <span>Export CSV</span>
+            </button>
+
+            <div className="h-4 w-px bg-stone-800 hidden sm:block"></div>
+
             {(['all', 'PAID', 'PENDING'] as const).map(st => (
               <button
                 key={st}

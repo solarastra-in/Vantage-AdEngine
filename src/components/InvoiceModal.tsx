@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Invoice } from '../types';
-import { X, Printer, Download, CheckCircle2, ShieldCheck, FileText, Layers } from 'lucide-react';
+import { X, Printer, Download, CheckCircle2, ShieldCheck, FileText, Layers, Mail, Send } from 'lucide-react';
 
 interface InvoiceModalProps {
   invoice: Invoice | null;
@@ -9,10 +9,21 @@ interface InvoiceModalProps {
 }
 
 export const InvoiceModal: React.FC<InvoiceModalProps> = ({ invoice, onClose, onPayInvoice }) => {
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [reminderSent, setReminderSent] = useState(false);
+
   if (!invoice) return null;
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleSendEmailReminder = () => {
+    setSendingEmail(true);
+    setTimeout(() => {
+      setSendingEmail(false);
+      setReminderSent(true);
+    }, 800);
   };
 
   return (
@@ -27,6 +38,18 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ invoice, onClose, on
           </div>
 
           <div className="flex items-center gap-2">
+            {invoice.status === 'PENDING' && (
+              <button
+                onClick={handleSendEmailReminder}
+                disabled={sendingEmail}
+                className="p-1.5 bg-stone-900 border border-stone-800 text-stone-300 hover:text-white rounded-xs cursor-pointer text-xs font-mono flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                title={`Send reminder to ${invoice.customerEmail}`}
+              >
+                <Mail className="w-3.5 h-3.5 text-amber-400" />
+                <span>{sendingEmail ? 'Sending...' : reminderSent ? 'Reminder Sent' : 'Email Reminder'}</span>
+              </button>
+            )}
+
             <button
               onClick={handlePrint}
               className="p-1.5 bg-stone-900 border border-stone-800 text-stone-300 hover:text-white rounded-xs cursor-pointer text-xs font-mono flex items-center gap-1.5"
@@ -43,6 +66,22 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ invoice, onClose, on
             </button>
           </div>
         </div>
+
+        {/* Reminder Notification Banner */}
+        {reminderSent && (
+          <div className="px-6 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-400 text-xs font-mono flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Notification email reminder successfully dispatched to <strong>{invoice.customerEmail}</strong></span>
+            </div>
+            <button
+              onClick={() => setReminderSent(false)}
+              className="text-stone-400 hover:text-emerald-300 text-[10px] underline cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Printable Invoice Container */}
         <div id="printable-invoice" className="p-8 space-y-8 bg-[#0d0d0d] font-sans">
