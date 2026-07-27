@@ -375,9 +375,9 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
   }, []);
 
   // Encrypt & store credentials for a platform via the real server-side vault (AES-256-GCM)
-  const handleEncryptPlatformKey = async (platform: PlatformType) => {
+  const handleEncryptPlatformKey = async (platform: PlatformType): Promise<ChannelCredentials | null> => {
     const cred = credentials[platform];
-    if (!cred || !cred.accountId || !cred.apiKeyOrToken) return;
+    if (!cred || !cred.accountId || !cred.apiKeyOrToken) return null;
 
     setValidatingPlatform(platform);
     try {
@@ -401,19 +401,20 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
       if (!res.ok) throw new Error(`Vault encryption failed (${res.status})`);
       const enc: { algorithm: string; fingerprint: string } = await res.json();
 
-      setCredentials(prev => ({
-        ...prev,
-        [platform]: {
-          ...prev[platform],
-          apiKeyOrToken: `••••••••${enc.fingerprint.slice(0, 6)}`,
-          isEncrypted: true,
-          keyHash: enc.fingerprint,
-          encryptionAlgorithm: enc.algorithm,
-        },
-      }));
+      const maskedCred: ChannelCredentials = {
+        ...cred,
+        apiKeyOrToken: `••••••••${enc.fingerprint.slice(0, 6)}`,
+        isEncrypted: true,
+        keyHash: enc.fingerprint,
+        encryptionAlgorithm: enc.algorithm,
+      };
+
+      setCredentials(prev => ({ ...prev, [platform]: maskedCred }));
       refreshDispatchModeInfo();
+      return maskedCred;
     } catch (err) {
       console.error('Credential encryption error:', err);
+      return null;
     } finally {
       setValidatingPlatform(null);
     }
@@ -538,14 +539,18 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
     handleTestApiKeyConnection(platform);
   };
 
-  // Validate & Encrypt all tenant keys
+  // Validate & Encrypt all tenant keys. Uses the masked credential RETURNED
+  // by handleEncryptPlatformKey, not the `credentials[p]` closure variable
+  // -- reading that closure here would race the async encrypt call and
+  // persist the still-plaintext secret to Firestore before the mask lands
+  // in state, silently bypassing the masking fix in handleSaveCredential.
   const handleValidateAndEncryptAll = async () => {
     const platforms: PlatformType[] = ['meta', 'google', 'linkedin', 'tiktok', 'pinterest', 'x', 'programmatic'];
     for (const p of platforms) {
-      handleEncryptPlatformKey(p);
+      const maskedCred = await handleEncryptPlatformKey(p);
       await handleTestApiKeyConnection(p);
-      if (credentials[p]) {
-        await saveChannelCredentialsToFirestore('org-astracloud', credentials[p]);
+      if (maskedCred) {
+        await saveChannelCredentialsToFirestore('org-astracloud', maskedCred);
       }
     }
     setCredentialsSaveSuccess('ALL CHANNELS ENCRYPTED & VERIFIED');
@@ -1379,7 +1384,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
                 environment: 'SANDBOX_SIMULATED',
                 validationStatus: 'CONNECTED',
               };
-              const isEncrypted = cred.isEncrypted || cred.apiKeyOrToken?.startsWith('ENC_AES256_');
+              const isEncrypted = !!cred.isEncrypted;
               const valErr = validationErrors[cfg.platform];
 
               return (

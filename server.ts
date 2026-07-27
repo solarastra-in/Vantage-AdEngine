@@ -439,7 +439,7 @@ app.get('/api/channels/credentials-info', (req, res) => {
   const platformMeta: { platform: string; name: string; envVar: string; docsUrl: string }[] = [
     { platform: 'meta', name: 'Meta Marketing API', envVar: 'META_ACCESS_TOKEN', docsUrl: 'https://developers.facebook.com/docs/marketing-apis/' },
     { platform: 'google', name: 'Google Ads API', envVar: 'GOOGLE_ADS_DEVELOPER_TOKEN', docsUrl: 'https://developers.google.com/google-ads/api/docs/first-call/overview' },
-    { platform: 'linkedin', name: 'LinkedIn Marketing API', envVar: 'LINKEDIN_CLIENT_SECRET', status: 'SIMULATED_ACTIVE', docsUrl: 'https://learn.microsoft.com/en-us/linkedin/marketing/' } as any,
+    { platform: 'linkedin', name: 'LinkedIn Marketing API', envVar: 'LINKEDIN_CLIENT_SECRET', docsUrl: 'https://learn.microsoft.com/en-us/linkedin/marketing/' },
     { platform: 'tiktok', name: 'TikTok Business Open API', envVar: 'TIKTOK_APP_SECRET', docsUrl: 'https://ads.tiktok.com/marketing_api/docs' },
     { platform: 'pinterest', name: 'Pinterest Ads v5 API', envVar: 'PINTEREST_ACCESS_TOKEN', docsUrl: 'https://developers.pinterest.com/docs/api/v5/' },
     { platform: 'x', name: 'X (Twitter) Ads API', envVar: 'X_ADS_BEARER_TOKEN', docsUrl: 'https://developer.x.com/en/docs/x-ads-api' },
