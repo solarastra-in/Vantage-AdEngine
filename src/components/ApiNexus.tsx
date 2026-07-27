@@ -312,6 +312,31 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
   const [testingPlatform, setTestingPlatform] = useState<PlatformType | null>(null);
   const [activeLog, setActiveLog] = useState<any>(null);
 
+  // Real dispatch-mode status per channel: LIVE_CREDENTIALS_CONFIGURED or DRY_RUN_NO_CREDENTIALS
+  const [dispatchModeInfo, setDispatchModeInfo] = useState<{
+    notice: string;
+    channels: { platform: string; status: string; accountId?: string }[];
+  } | null>(null);
+
+  const refreshDispatchModeInfo = async () => {
+    try {
+      const res = await fetch('/api/channels/credentials-info');
+      setDispatchModeInfo(await res.json());
+    } catch (err) {
+      console.warn('Could not load dispatch mode info:', err);
+    }
+  };
+
+  useEffect(() => {
+    refreshDispatchModeInfo();
+  }, []);
+
+  const dispatchModeFor = (platform: PlatformType): 'LIVE' | 'DRY_RUN' | 'UNKNOWN' => {
+    const entry = dispatchModeInfo?.channels.find(c => c.platform === platform);
+    if (!entry) return 'UNKNOWN';
+    return entry.status === 'LIVE_CREDENTIALS_CONFIGURED' ? 'LIVE' : 'DRY_RUN';
+  };
+
   // Load channel credentials from Firestore on mount
   useEffect(() => {
     const loadCreds = async () => {
@@ -349,20 +374,49 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
     runFullTestSuite();
   }, []);
 
-  // Encrypt Key for a platform
-  const handleEncryptPlatformKey = (platform: PlatformType) => {
+  // Encrypt & store credentials for a platform via the real server-side vault (AES-256-GCM)
+  const handleEncryptPlatformKey = async (platform: PlatformType) => {
     const cred = credentials[platform];
-    if (!cred || !cred.apiKeyOrToken) return;
+    if (!cred || !cred.accountId || !cred.apiKeyOrToken) return;
 
-    setCredentials(prev => ({
-      ...prev,
-      [platform]: {
-        ...prev[platform],
-        isEncrypted: true,
-        keyHash: `0x${Math.abs(cred.apiKeyOrToken.length * 31).toString(16).padStart(8, '0')}`,
-        encryptionAlgorithm: 'AES-256-GCM (Server Vault)',
-      },
-    }));
+    setValidatingPlatform(platform);
+    try {
+      const extraFields: Record<string, string> = {};
+      if (cred.developerToken) extraFields.developerToken = cred.developerToken;
+      if (cred.apiSecret) extraFields.apiSecret = cred.apiSecret;
+      if (cred.pixelIdOrTag) extraFields.pixelIdOrTag = cred.pixelIdOrTag;
+      if (cred.merchantOrCompanyUrn) extraFields.companyUrn = cred.merchantOrCompanyUrn;
+
+      const res = await fetch('/api/vault/encrypt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform,
+          accountId: cred.accountId,
+          apiKeyOrToken: cred.apiKeyOrToken,
+          extraFields,
+          environment: cred.environment,
+        }),
+      });
+      if (!res.ok) throw new Error(`Vault encryption failed (${res.status})`);
+      const enc: { algorithm: string; fingerprint: string } = await res.json();
+
+      setCredentials(prev => ({
+        ...prev,
+        [platform]: {
+          ...prev[platform],
+          apiKeyOrToken: `••••••••${enc.fingerprint.slice(0, 6)}`,
+          isEncrypted: true,
+          keyHash: enc.fingerprint,
+          encryptionAlgorithm: enc.algorithm,
+        },
+      }));
+      refreshDispatchModeInfo();
+    } catch (err) {
+      console.error('Credential encryption error:', err);
+    } finally {
+      setValidatingPlatform(null);
+    }
   };
 
   // Real-time API Key Verification Check & Test Endpoint Call
@@ -498,7 +552,8 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
     setTimeout(() => setCredentialsSaveSuccess(null), 3000);
   };
 
-  // Save Channel Credentials to Firestore after endpoint verification
+  // Save Channel Credentials. Plaintext secret goes to server vault (AES-256-GCM);
+  // only masked placeholder & fingerprint are stored in Firestore.
   const handleSaveCredential = async (platform: PlatformType) => {
     if (activeRole === 'READ_ONLY_ANALYST' || activeRole === 'FINANCE_ADMIN') {
       alert(`Role ${activeRole} is not permitted to modify API credentials.`);
@@ -507,29 +562,55 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
 
     setSavingPlatform(platform);
     try {
+      const credToSave = credentials[platform];
+
+      if (!credToSave.accountId || !credToSave.apiKeyOrToken) {
+        alert('Account ID and API Key/Token are required before saving.');
+        setSavingPlatform(null);
+        return;
+      }
+
       // MANDATORY: Call test endpoint to verify connection BEFORE saving key
       const isVerified = await handleTestApiKeyConnection(platform);
 
-      const credToSave = credentials[platform];
-      const updatedCred: ChannelCredentials = {
-        ...credToSave,
-        validationStatus: isVerified ? 'CONNECTED' : 'INVALID_CREDENTIALS',
-        lastValidatedAt: new Date().toISOString(),
-      };
+      const extraFields: Record<string, string> = {};
+      if (credToSave.developerToken) extraFields.developerToken = credToSave.developerToken;
+      if (credToSave.apiSecret) extraFields.apiSecret = credToSave.apiSecret;
+      if (credToSave.pixelIdOrTag) extraFields.pixelIdOrTag = credToSave.pixelIdOrTag;
+      if (credToSave.merchantOrCompanyUrn) extraFields.companyUrn = credToSave.merchantOrCompanyUrn;
 
-      await fetch('/api/vault/encrypt', {
+      const vaultRes = await fetch('/api/vault/encrypt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           platform,
           accountId: credToSave.accountId,
           apiKeyOrToken: credToSave.apiKeyOrToken,
+          extraFields,
           environment: credToSave.environment,
         }),
       });
 
+      if (!vaultRes.ok) {
+        throw new Error(`Vault encryption failed (${vaultRes.status})`);
+      }
+      const vaultResult: { algorithm: string; fingerprint: string } = await vaultRes.json();
+
+      const updatedCred: ChannelCredentials = {
+        ...credToSave,
+        apiKeyOrToken: `••••••••${vaultResult.fingerprint.slice(0, 6)}`,
+        developerToken: credToSave.developerToken ? '••••••••' : credToSave.developerToken,
+        apiSecret: credToSave.apiSecret ? '••••••••' : credToSave.apiSecret,
+        isEncrypted: true,
+        keyHash: vaultResult.fingerprint,
+        encryptionAlgorithm: vaultResult.algorithm,
+        validationStatus: isVerified ? 'CONNECTED' : 'INVALID_CREDENTIALS',
+        lastValidatedAt: new Date().toISOString(),
+      };
+
       await saveChannelCredentialsToFirestore('org-astracloud', updatedCred);
       setCredentials(prev => ({ ...prev, [platform]: updatedCred }));
+      refreshDispatchModeInfo();
 
       if (isVerified) {
         setCredentialsSaveSuccess(platform);
@@ -550,7 +631,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
       [platform]: {
         ...prev[platform],
         [field]: value,
-        isEncrypted: field === 'apiKeyOrToken' && value.startsWith('ENC_AES256_') ? true : prev[platform]?.isEncrypted,
+        isEncrypted: (field === 'apiKeyOrToken' || field === 'developerToken' || field === 'apiSecret') ? false : prev[platform]?.isEncrypted,
       },
     }));
 
@@ -1179,10 +1260,24 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
               </div>
             </div>
 
+            {/* Real dispatch-mode status, sourced from the server's actual credential vault */}
+            {dispatchModeInfo && (
+              <div
+                className={`flex items-start gap-2.5 text-[11px] font-sans rounded px-3 py-2.5 border ${
+                  dispatchModeInfo.channels.every(c => c.status === 'DRY_RUN_NO_CREDENTIALS')
+                    ? 'bg-stone-900/60 border-stone-800 text-stone-400'
+                    : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>{dispatchModeInfo.notice}</span>
+              </div>
+            )}
+
             {credentialsSaveSuccess && (
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono rounded flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Successfully saved {credentialsSaveSuccess.toUpperCase()} credentials to Firestore Vault!</span>
+                <span>Saved {credentialsSaveSuccess.toUpperCase()} -- secret encrypted server-side (AES-256-GCM); only a masked reference is stored in Firestore.</span>
               </div>
             )}
           </div>
@@ -1296,6 +1391,27 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
                     </div>
 
                     <div className="flex items-center gap-2 font-mono">
+                      {(() => {
+                        const mode = dispatchModeFor(cfg.platform);
+                        if (mode === 'UNKNOWN') return null;
+                        return (
+                          <span
+                            title={
+                              mode === 'LIVE'
+                                ? 'Credentials configured -- publish will make a real API call to this platform.'
+                                : 'No credentials configured -- publish will run real transform/validation but will not call this platform\'s API.'
+                            }
+                            className={`text-[9px] px-2 py-0.5 rounded border flex items-center gap-1 font-bold ${
+                              mode === 'LIVE'
+                                ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
+                                : 'text-stone-400 bg-stone-500/10 border-stone-500/30'
+                            }`}
+                          >
+                            <Radio className="w-2.5 h-2.5" />
+                            <span>{mode === 'LIVE' ? 'LIVE DISPATCH' : 'DRY RUN'}</span>
+                          </span>
+                        );
+                      })()}
                       {isEncrypted && (
                         <span className="text-[9px] text-amber-300 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded flex items-center gap-1 font-bold">
                           <Lock className="w-2.5 h-2.5" />

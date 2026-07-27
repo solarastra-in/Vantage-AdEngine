@@ -5,6 +5,9 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { INITIAL_CAMPAIGNS, INITIAL_CHANNELS, INITIAL_INVOICES, INITIAL_TIME_SERIES } from './src/data/initialData';
 import { Campaign, ChannelApiStatus, Invoice, PlatformType } from './src/types';
 import { encryptSecret, decryptSecret } from './src/lib/vaultCrypto.server';
+import { recordVaultAudit, getVaultAuditLog, detectAnomalousAccess, VaultAuditAction } from './src/lib/vaultAuditLog.server';
+import { assessCreativeFatigue } from './src/lib/creativeFatigueDetector';
+import { acquirePublishLock, releasePublishLock, getCachedResult, storeResult, PublishInProgressError } from './src/lib/idempotencyStore';
 import { dispatchCampaign } from './src/lib/campaignDispatchEngine';
 import { registerAllAdapters } from './src/lib/adapters';
 import { computeBudgetReallocation } from './src/lib/budgetOptimizer';
@@ -170,6 +173,21 @@ app.post('/api/campaigns/:id/publish', async (req, res) => {
     return res.status(404).json({ error: 'Campaign not found' });
   }
 
+  const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
+  const cached = getCachedResult(idempotencyKey);
+  if (cached) {
+    return res.json({ ...cached, idempotent: true });
+  }
+
+  try {
+    acquirePublishLock(campaign.id);
+  } catch (err) {
+    if (err instanceof PublishInProgressError) {
+      return res.status(409).json({ error: err.message });
+    }
+    throw err;
+  }
+
   campaign.status = 'publishing';
   campaign.publishStatuses = campaign.channels.map(ch => ({
     platform: ch.platform,
@@ -201,7 +219,7 @@ app.post('/api/campaigns/:id/publish', async (req, res) => {
       });
     }
 
-    res.json({
+    const responseBody = {
       message:
         report.overallStatus === 'ALL_LIVE'
           ? 'All channels published successfully.'
@@ -212,10 +230,15 @@ app.post('/api/campaigns/:id/publish', async (req, res) => {
       targetChannels: campaign.channels.map(c => c.platformName),
       status: campaign.status,
       dispatchReport: report,
-    });
+    };
+
+    storeResult(idempotencyKey, responseBody);
+    res.json(responseBody);
   } catch (err: any) {
     campaign.status = 'draft';
     res.status(500).json({ error: 'Dispatch engine error', details: err.message });
+  } finally {
+    releasePublishLock(campaign.id);
   }
 });
 
@@ -267,6 +290,14 @@ app.post('/api/vault/encrypt', (req, res) => {
     encryptedExtra: Object.keys(encryptedExtra).length ? encryptedExtra : undefined,
   };
 
+  recordVaultAudit({
+    platform,
+    action: 'ENCRYPT',
+    actor: (req.headers['x-user-id'] as string) ?? 'unknown',
+    fingerprint: encryptedSecret.fingerprint,
+    outcome: 'success',
+  });
+
   res.json({
     platform,
     accountId,
@@ -279,7 +310,15 @@ app.post('/api/vault/encrypt', (req, res) => {
 });
 
 app.delete('/api/vault/:platform', (req, res) => {
+  const existed = !!credentialVault[req.params.platform];
   delete credentialVault[req.params.platform];
+  recordVaultAudit({
+    platform: req.params.platform,
+    action: 'DELETE',
+    actor: (req.headers['x-user-id'] as string) ?? 'unknown',
+    outcome: existed ? 'success' : 'failure',
+    detail: existed ? undefined : 'No credential existed for this platform',
+  });
   res.json({ success: true });
 });
 
@@ -293,6 +332,12 @@ app.get('/api/vault/status', (req, res) => {
   res.json(status);
 });
 
+// Read-only audit trail of every vault action.
+app.get('/api/vault/audit-log', (req, res) => {
+  const { platform, action } = req.query as { platform?: string; action?: VaultAuditAction };
+  res.json(getVaultAuditLog({ platform, action }));
+});
+
 function getResolvedCredential(platform: string): { accountId: string; secret: string; extra?: Record<string, string> } | null {
   const stored = credentialVault[platform];
   if (!stored) return null;
@@ -304,8 +349,27 @@ function getResolvedCredential(platform: string): { accountId: string; secret: s
         extra[key] = decryptSecret(env.envelope);
       }
     }
+    recordVaultAudit({
+      platform,
+      action: 'DECRYPT',
+      actor: 'dispatch-engine',
+      fingerprint: stored.encryptedSecret.fingerprint,
+      outcome: 'success',
+    });
+    const { anomalous, countInWindow } = detectAnomalousAccess(platform);
+    if (anomalous) {
+      // eslint-disable-next-line no-console
+      console.warn(`[vaultAudit] Anomalous decrypt volume for ${platform}: ${countInWindow} decrypts in the last minute.`);
+    }
     return { accountId: stored.accountId, secret, extra: Object.keys(extra).length ? extra : undefined };
-  } catch {
+  } catch (err: any) {
+    recordVaultAudit({
+      platform,
+      action: 'DECRYPT',
+      actor: 'dispatch-engine',
+      outcome: 'failure',
+      detail: err.message,
+    });
     return null;
   }
 }
@@ -372,18 +436,31 @@ app.get('/api/channels/specs', (req, res) => {
 
 // Credentials & Instructions Status API
 app.get('/api/channels/credentials-info', (req, res) => {
+  const platformMeta: { platform: string; name: string; envVar: string; docsUrl: string }[] = [
+    { platform: 'meta', name: 'Meta Marketing API', envVar: 'META_ACCESS_TOKEN', docsUrl: 'https://developers.facebook.com/docs/marketing-apis/' },
+    { platform: 'google', name: 'Google Ads API', envVar: 'GOOGLE_ADS_DEVELOPER_TOKEN', docsUrl: 'https://developers.google.com/google-ads/api/docs/first-call/overview' },
+    { platform: 'linkedin', name: 'LinkedIn Marketing API', envVar: 'LINKEDIN_CLIENT_SECRET', status: 'SIMULATED_ACTIVE', docsUrl: 'https://learn.microsoft.com/en-us/linkedin/marketing/' } as any,
+    { platform: 'tiktok', name: 'TikTok Business Open API', envVar: 'TIKTOK_APP_SECRET', docsUrl: 'https://ads.tiktok.com/marketing_api/docs' },
+    { platform: 'pinterest', name: 'Pinterest Ads v5 API', envVar: 'PINTEREST_ACCESS_TOKEN', docsUrl: 'https://developers.pinterest.com/docs/api/v5/' },
+    { platform: 'x', name: 'X (Twitter) Ads API', envVar: 'X_ADS_BEARER_TOKEN', docsUrl: 'https://developer.x.com/en/docs/x-ads-api' },
+    { platform: 'programmatic', name: 'DSP OpenRTB Gateway', envVar: 'DSP_OPENRTB_SECRET', docsUrl: 'https://www.iab.com/guidelines/openrtb/' },
+  ];
+
+  const channelsInfo = platformMeta.map(p => ({
+    ...p,
+    status: credentialVault[p.platform] ? 'LIVE_CREDENTIALS_CONFIGURED' : 'DRY_RUN_NO_CREDENTIALS',
+    accountId: credentialVault[p.platform]?.accountId,
+  }));
+
+  const liveCount = channelsInfo.filter(c => c.status === 'LIVE_CREDENTIALS_CONFIGURED').length;
+
   res.json({
-    notice: 'Vantage AdEngine is pre-configured with active sandbox mock tokens & live endpoint simulators for all 7 channels.',
-    userInstructions: 'To target live production ad accounts, provide your Channel API credentials below or in environment variables.',
-    channels: [
-      { platform: 'meta', name: 'Meta Marketing API', envVar: 'META_ACCESS_TOKEN', status: 'SIMULATED_ACTIVE', docsUrl: 'https://developers.facebook.com/docs/marketing-apis/' },
-      { platform: 'google', name: 'Google Ads API', envVar: 'GOOGLE_ADS_DEVELOPER_TOKEN', status: 'SIMULATED_ACTIVE', docsUrl: 'https://developers.google.com/google-ads/api/docs/first-call/overview' },
-      { platform: 'linkedin', name: 'LinkedIn Marketing API', envVar: 'LINKEDIN_CLIENT_SECRET', status: 'SIMULATED_ACTIVE', docsUrl: 'https://learn.microsoft.com/en-us/linkedin/marketing/' },
-      { platform: 'tiktok', name: 'TikTok Business Open API', envVar: 'TIKTOK_APP_SECRET', status: 'SIMULATED_ACTIVE', docsUrl: 'https://ads.tiktok.com/marketing_api/docs' },
-      { platform: 'pinterest', name: 'Pinterest Ads v5 API', envVar: 'PINTEREST_ACCESS_TOKEN', status: 'SIMULATED_ACTIVE', docsUrl: 'https://developers.pinterest.com/docs/api/v5/' },
-      { platform: 'x', name: 'X (Twitter) Ads API', envVar: 'X_ADS_BEARER_TOKEN', status: 'SIMULATED_ACTIVE', docsUrl: 'https://developer.x.com/en/docs/x-ads-api' },
-      { platform: 'programmatic', name: 'DSP OpenRTB Gateway', envVar: 'DSP_OPENRTB_SECRET', status: 'SIMULATED_ACTIVE', docsUrl: 'https://www.iab.com/guidelines/openrtb/' },
-    ],
+    notice:
+      liveCount === 0
+        ? 'No live credentials are configured for any of the 7 channels. Every channel currently dispatches through its adapter\'s DRY_RUN path: real transform + validation logic runs, but no network call reaches Meta/Google/LinkedIn/etc, and no externalId is a real ad ID.'
+        : `${liveCount} of 7 channels have live credentials configured and will dispatch real API calls on publish. The rest remain DRY_RUN until credentials are added.`,
+    userInstructions: 'Provide Channel API credentials in the API Nexus panel (they are encrypted server-side with AES-256-GCM before storage, never sent back to the browser in plaintext).',
+    channels: channelsInfo,
   });
 });
 
@@ -1140,6 +1217,79 @@ Return JSON matching the specific character limits and ad specs for ${platform}.
     res.json({ result: response.text });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Real budget reallocation endpoint
+app.post('/api/budget/reallocate', (req, res) => {
+  try {
+    const { totalBudget, currentSpend, history, constraints, stepCount } = req.body as {
+      totalBudget: number;
+      currentSpend: Record<string, number>;
+      history: Record<string, { spend: number; normalizedConversions: number }[]>;
+      constraints: {
+        platform: string;
+        minSharePct: number;
+        maxSharePct: number;
+        valuePerConversion: number;
+      }[];
+      stepCount?: number;
+    };
+
+    if (!totalBudget || !constraints?.length) {
+      return res.status(400).json({ error: 'totalBudget and constraints are required' });
+    }
+
+    const plan = computeBudgetReallocation(
+      history as any,
+      currentSpend as any,
+      totalBudget,
+      constraints as any,
+      stepCount
+    );
+    res.json(plan);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Budget reallocation failed', details: err.message });
+  }
+});
+
+// Real A/B test significance endpoint
+app.post('/api/ab-test/evaluate', (req, res) => {
+  try {
+    const { control, variants, alpha, minimumDetectableEffectRel } = req.body as {
+      control: { id: string; impressions: number; conversions: number };
+      variants: { id: string; impressions: number; conversions: number }[];
+      alpha?: number;
+      minimumDetectableEffectRel?: number;
+    };
+    if (!control || !variants) {
+      return res.status(400).json({ error: 'control and variants are required' });
+    }
+    const results = evaluateAbTest(control, variants, { alpha, minimumDetectableEffectRel });
+    res.json({ results });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Significance evaluation failed', details: err.message });
+  }
+});
+
+// Real creative fatigue detection
+app.post('/api/creatives/:creativeId/fatigue', (req, res) => {
+  try {
+    const { history, baselineFraction, recentWindowDays } = req.body as {
+      history: { date: string; impressions: number; clicks: number; conversions: number; spend: number; uniqueUsers?: number }[];
+      baselineFraction?: number;
+      recentWindowDays?: number;
+    };
+    if (!history?.length) {
+      return res.status(400).json({ error: 'history is required' });
+    }
+    const assessment = assessCreativeFatigue(req.params.creativeId, history, { baselineFraction, recentWindowDays });
+    if (!assessment) {
+      return res.json({ status: 'insufficient_data', message: 'Not enough performance history yet to assess fatigue.' });
+    }
+    res.json(assessment);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Fatigue assessment failed', details: err.message });
   }
 });
 

@@ -154,8 +154,17 @@ export function App() {
         )
       );
 
-      const res = await fetch(`/api/campaigns/${campaignId}/publish`, { method: 'POST' });
+      const idempotencyKey = `pub_${campaignId}_${crypto.randomUUID()}`;
+      const res = await fetch(`/api/campaigns/${campaignId}/publish`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+      });
       const data = await res.json();
+
+      if (res.status === 409) {
+        console.warn('Publish already in progress for this campaign:', data.error);
+        return;
+      }
 
       if (data.dispatchReport) {
         setActiveDispatchReport(data.dispatchReport as DispatchReportUI);

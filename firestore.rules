@@ -11,6 +11,11 @@ service cloud.firestore {
     match /organizations/{orgId} {
       allow read, write: if true;
       
+      // Channel credentials: client-side writes only masked placeholders
+      match /credentials/{platform} {
+        allow read, write: if request.auth != null && request.auth.uid != null;
+      }
+
       // Tenant sub-collections (credentials, campaigns, channels, invoices, etc.)
       match /{allSubcollections=**} {
         allow read, write: if true;
