@@ -8,15 +8,41 @@ import { encryptSecret, decryptSecret } from './src/lib/vaultCrypto.server';
 import { recordVaultAudit, getVaultAuditLog, detectAnomalousAccess, VaultAuditAction } from './src/lib/vaultAuditLog.server';
 import { assessCreativeFatigue } from './src/lib/creativeFatigueDetector';
 import { acquirePublishLock, releasePublishLock, getCachedResult, storeResult, PublishInProgressError } from './src/lib/idempotencyStore';
-import { dispatchCampaign } from './src/lib/campaignDispatchEngine';
+import { dispatchCampaign, listRegisteredPlatforms } from './src/lib/campaignDispatchEngine';
 import { registerAllAdapters } from './src/lib/adapters';
 import { computeBudgetReallocation } from './src/lib/budgetOptimizer';
 import { evaluateAbTest } from './src/lib/statsEngine';
+import { getOrgId, scopedKey, DEFAULT_ORG_ID } from './src/lib/tenantContext.server';
+import { withValidation, requireString, requireFiniteNumber, requireArray, requireObject, ValidationError } from './src/lib/requestValidation.server';
 
 registerAllAdapters();
 
-// In-Memory Storage
-let campaigns: Campaign[] = [...INITIAL_CAMPAIGNS];
+// Startup diagnostics: surface configuration problems immediately, in the
+// server logs, before the first request ever depends on them -- rather
+// than each subsystem discovering the same missing env var independently
+// (and differently) the first time it's exercised.
+function logStartupDiagnostics() {
+  const warnings: string[] = [];
+  if (!process.env.VAULT_MASTER_KEY) {
+    warnings.push(
+      'VAULT_MASTER_KEY is not set. An ephemeral key will be used for this process only -- ' +
+      'every credential encrypted this session becomes undecryptable on restart. Set it with ' +
+      '`openssl rand -hex 32` before running with real customer credentials.'
+    );
+  }
+  if (!process.env.GEMINI_API_KEY) {
+    warnings.push('GEMINI_API_KEY is not set -- AI content generation endpoints will be unavailable.');
+  }
+  if (warnings.length) {
+    // eslint-disable-next-line no-console
+    console.warn('\n[startup] Configuration warnings:\n' + warnings.map(w => `  - ${w}`).join('\n') + '\n');
+  }
+}
+logStartupDiagnostics();
+
+// In-Memory Storage. Campaigns are tenant-scoped via orgId (seed data
+// defaults to DEFAULT_ORG_ID since it predates multi-tenant scoping).
+let campaigns: Campaign[] = INITIAL_CAMPAIGNS.map(c => ({ ...c, orgId: c.orgId ?? DEFAULT_ORG_ID }));
 let channels: ChannelApiStatus[] = [...INITIAL_CHANNELS];
 let invoices: Invoice[] = [...INITIAL_INVOICES];
 let timeSeriesData = [...INITIAL_TIME_SERIES];
@@ -47,18 +73,43 @@ const getGenAI = () => {
 // API ROUTES
 // -------------------------------------------------------------
 
-// 1. Health check
+// 1. Health check. Reports real subsystem status, not just "the process is
+// running" -- in particular, flags the single most dangerous silent-failure
+// mode in this app: if VAULT_MASTER_KEY isn't set, every stored credential
+// becomes permanently undecryptable on the next restart (vaultCrypto.server.ts
+// falls back to an ephemeral key). That should show up in health checks and
+// uptime monitoring, not just a console.warn someone might not be watching.
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const vaultKeyConfigured = !!process.env.VAULT_MASTER_KEY;
+  const geminiConfigured = !!process.env.GEMINI_API_KEY;
+
+  const status = vaultKeyConfigured ? 'ok' : 'degraded';
+
+  res.status(status === 'ok' ? 200 : 200).json({
+    status,
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
+    checks: {
+      vaultMasterKeyConfigured: vaultKeyConfigured,
+      vaultMasterKeyWarning: vaultKeyConfigured
+        ? undefined
+        : 'VAULT_MASTER_KEY is not set -- credentials encrypted this session will become undecryptable on restart.',
+      geminiApiConfigured: geminiConfigured,
+      campaignsLoaded: campaigns.length,
+      registeredAdapterPlatforms: listRegisteredPlatforms(),
+    },
+  });
 });
 
 // 2. Campaigns API
 app.get('/api/campaigns', (req, res) => {
-  res.json(campaigns);
+  const orgId = getOrgId(req);
+  res.json(campaigns.filter(c => c.orgId === orgId));
 });
 
 app.get('/api/campaigns/:id', (req, res) => {
-  const campaign = campaigns.find(c => c.id === req.params.id);
+  const orgId = getOrgId(req);
+  const campaign = campaigns.find(c => c.id === req.params.id && c.orgId === orgId);
   if (!campaign) {
     return res.status(404).json({ error: 'Campaign not found' });
   }
@@ -66,9 +117,11 @@ app.get('/api/campaigns/:id', (req, res) => {
 });
 
 app.post('/api/campaigns', (req, res) => {
+  const orgId = getOrgId(req);
   const body = req.body;
   const newCampaign: Campaign = {
     id: `cmp-${Date.now().toString().slice(-4)}`,
+    orgId,
     name: body.name || 'Untitled Campaign',
     objective: body.objective || 'Lead Generation',
     status: body.publishNow ? 'publishing' : 'draft',
@@ -168,19 +221,22 @@ app.delete('/api/campaigns/:id', (req, res) => {
 // credentialVault, each channel dispatches through its DRY_RUN adapter,
 // which is explicitly labeled as such rather than pretending to be live.
 app.post('/api/campaigns/:id/publish', async (req, res) => {
-  const campaign = campaigns.find(c => c.id === req.params.id);
+  const orgId = getOrgId(req);
+  const campaign = campaigns.find(c => c.id === req.params.id && c.orgId === orgId);
   if (!campaign) {
     return res.status(404).json({ error: 'Campaign not found' });
   }
 
   const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
-  const cached = getCachedResult(idempotencyKey);
+  const scopedIdempotencyKey = idempotencyKey ? scopedKey(orgId, idempotencyKey) : undefined;
+  const cached = getCachedResult(scopedIdempotencyKey);
   if (cached) {
     return res.json({ ...cached, idempotent: true });
   }
 
+  const lockKey = scopedKey(orgId, campaign.id);
   try {
-    acquirePublishLock(campaign.id);
+    acquirePublishLock(lockKey);
   } catch (err) {
     if (err instanceof PublishInProgressError) {
       return res.status(409).json({ error: err.message });
@@ -195,7 +251,7 @@ app.post('/api/campaigns/:id/publish', async (req, res) => {
   }));
 
   try {
-    const report = await dispatchCampaign(campaign, (platform) => getResolvedCredential(platform));
+    const report = await dispatchCampaign(campaign, (platform) => getResolvedCredential(orgId, platform));
 
     campaign.status = report.overallStatus === 'ALL_LIVE' ? 'active'
       : report.overallStatus === 'PARTIAL' ? 'active'
@@ -232,13 +288,13 @@ app.post('/api/campaigns/:id/publish', async (req, res) => {
       dispatchReport: report,
     };
 
-    storeResult(idempotencyKey, responseBody);
+    storeResult(scopedIdempotencyKey, responseBody);
     res.json(responseBody);
   } catch (err: any) {
     campaign.status = 'draft';
     res.status(500).json({ error: 'Dispatch engine error', details: err.message });
   } finally {
-    releasePublishLock(campaign.id);
+    releasePublishLock(lockKey);
   }
 });
 
@@ -253,8 +309,13 @@ app.post('/api/campaigns/:id/toggle-status', (req, res) => {
 
 // In-memory encrypted credential vault (server-side only; envelopes only,
 // plaintext never persisted or returned to the client after this call).
+// Keyed by scopedKey(orgId, platform) -- NOT bare platform name -- so two
+// tenants' credentials for the same platform never collide. This was the
+// actual cross-tenant leak: before this fix, credentialVault['meta'] was
+// one global slot shared by every organization using this server.
 interface StoredCredential {
   platform: string;
+  orgId: string;
   accountId: string;
   environment: 'PRODUCTION' | 'SANDBOX_SIMULATED';
   encryptedSecret: ReturnType<typeof encryptSecret>;
@@ -262,17 +323,14 @@ interface StoredCredential {
 }
 const credentialVault: Record<string, StoredCredential> = {};
 
-app.post('/api/vault/encrypt', (req, res) => {
-  const { platform, accountId, apiKeyOrToken, extraFields, environment } = req.body as {
-    platform?: string;
-    accountId?: string;
-    apiKeyOrToken?: string;
-    extraFields?: Record<string, string>;
-    environment?: 'PRODUCTION' | 'SANDBOX_SIMULATED';
-  };
-  if (!platform || !accountId || !apiKeyOrToken) {
-    return res.status(400).json({ error: 'platform, accountId, and apiKeyOrToken are required' });
-  }
+app.post('/api/vault/encrypt', withValidation((req, res) => {
+  const orgId = getOrgId(req);
+  const body = req.body ?? {};
+  const platform = requireString(body.platform, 'platform');
+  const accountId = requireString(body.accountId, 'accountId');
+  const apiKeyOrToken = requireString(body.apiKeyOrToken, 'apiKeyOrToken');
+  const extraFields = body.extraFields as Record<string, string> | undefined;
+  const environment = body.environment as 'PRODUCTION' | 'SANDBOX_SIMULATED' | undefined;
 
   const encryptedSecret = encryptSecret(apiKeyOrToken);
   const encryptedExtra: Record<string, ReturnType<typeof encryptSecret>> = {};
@@ -282,8 +340,10 @@ app.post('/api/vault/encrypt', (req, res) => {
     }
   }
 
-  credentialVault[platform] = {
+  const key = scopedKey(orgId, platform);
+  credentialVault[key] = {
     platform,
+    orgId,
     accountId,
     environment: environment ?? 'PRODUCTION',
     encryptedSecret,
@@ -291,7 +351,7 @@ app.post('/api/vault/encrypt', (req, res) => {
   };
 
   recordVaultAudit({
-    platform,
+    platform: scopedKey(orgId, platform),
     action: 'ENCRYPT',
     actor: (req.headers['x-user-id'] as string) ?? 'unknown',
     fingerprint: encryptedSecret.fingerprint,
@@ -301,19 +361,21 @@ app.post('/api/vault/encrypt', (req, res) => {
   res.json({
     platform,
     accountId,
-    environment: credentialVault[platform].environment,
+    environment: credentialVault[key].environment,
     algorithm: encryptedSecret.algorithm,
     fingerprint: encryptedSecret.fingerprint,
     encryptedAt: encryptedSecret.encryptedAt,
     extraFieldKeys: Object.keys(encryptedExtra),
   });
-});
+}));
 
 app.delete('/api/vault/:platform', (req, res) => {
-  const existed = !!credentialVault[req.params.platform];
-  delete credentialVault[req.params.platform];
+  const orgId = getOrgId(req);
+  const key = scopedKey(orgId, req.params.platform);
+  const existed = !!credentialVault[key];
+  delete credentialVault[key];
   recordVaultAudit({
-    platform: req.params.platform,
+    platform: key,
     action: 'DELETE',
     actor: (req.headers['x-user-id'] as string) ?? 'unknown',
     outcome: existed ? 'success' : 'failure',
@@ -323,48 +385,59 @@ app.delete('/api/vault/:platform', (req, res) => {
 });
 
 app.get('/api/vault/status', (req, res) => {
+  const orgId = getOrgId(req);
+  const prefix = `${orgId}:`;
   const status = Object.fromEntries(
-    (Object.keys(credentialVault) as string[]).map(p => [
-      p,
-      { accountId: credentialVault[p].accountId, environment: credentialVault[p].environment, connected: true },
-    ])
+    Object.keys(credentialVault)
+      .filter(k => k.startsWith(prefix))
+      .map(k => {
+        const stored = credentialVault[k];
+        return [stored.platform, { accountId: stored.accountId, environment: stored.environment, connected: true }];
+      })
   );
   res.json(status);
 });
 
-// Read-only audit trail of every vault action.
+// Read-only audit trail of every vault action, scoped to the caller's tenant.
 app.get('/api/vault/audit-log', (req, res) => {
+  const orgId = getOrgId(req);
   const { platform, action } = req.query as { platform?: string; action?: VaultAuditAction };
-  res.json(getVaultAuditLog({ platform, action }));
+  const scopedPlatform = platform ? scopedKey(orgId, platform) : undefined;
+  const entries = getVaultAuditLog({ platform: scopedPlatform, action }).filter(e =>
+    // Entries are keyed with the scoped platform string; only return this tenant's.
+    e.platform.startsWith(`${orgId}:`)
+  );
+  res.json(entries);
 });
 
-function getResolvedCredential(platform: string): { accountId: string; secret: string; extra?: Record<string, string> } | null {
-  const stored = credentialVault[platform];
+function getResolvedCredential(orgId: string, platform: string): { accountId: string; secret: string; extra?: Record<string, string> } | null {
+  const key = scopedKey(orgId, platform);
+  const stored = credentialVault[key];
   if (!stored) return null;
   try {
     const secret = decryptSecret(stored.encryptedSecret.envelope);
     const extra: Record<string, string> = {};
     if (stored.encryptedExtra) {
-      for (const [key, env] of Object.entries(stored.encryptedExtra)) {
-        extra[key] = decryptSecret(env.envelope);
+      for (const [k, env] of Object.entries(stored.encryptedExtra)) {
+        extra[k] = decryptSecret(env.envelope);
       }
     }
     recordVaultAudit({
-      platform,
+      platform: key,
       action: 'DECRYPT',
       actor: 'dispatch-engine',
       fingerprint: stored.encryptedSecret.fingerprint,
       outcome: 'success',
     });
-    const { anomalous, countInWindow } = detectAnomalousAccess(platform);
+    const { anomalous, countInWindow } = detectAnomalousAccess(key);
     if (anomalous) {
       // eslint-disable-next-line no-console
-      console.warn(`[vaultAudit] Anomalous decrypt volume for ${platform}: ${countInWindow} decrypts in the last minute.`);
+      console.warn(`[vaultAudit] Anomalous decrypt volume for ${key}: ${countInWindow} decrypts in the last minute.`);
     }
     return { accountId: stored.accountId, secret, extra: Object.keys(extra).length ? extra : undefined };
   } catch (err: any) {
     recordVaultAudit({
-      platform,
+      platform: key,
       action: 'DECRYPT',
       actor: 'dispatch-engine',
       outcome: 'failure',
@@ -436,6 +509,7 @@ app.get('/api/channels/specs', (req, res) => {
 
 // Credentials & Instructions Status API
 app.get('/api/channels/credentials-info', (req, res) => {
+  const orgId = getOrgId(req);
   const platformMeta: { platform: string; name: string; envVar: string; docsUrl: string }[] = [
     { platform: 'meta', name: 'Meta Marketing API', envVar: 'META_ACCESS_TOKEN', docsUrl: 'https://developers.facebook.com/docs/marketing-apis/' },
     { platform: 'google', name: 'Google Ads API', envVar: 'GOOGLE_ADS_DEVELOPER_TOKEN', docsUrl: 'https://developers.google.com/google-ads/api/docs/first-call/overview' },
@@ -446,20 +520,25 @@ app.get('/api/channels/credentials-info', (req, res) => {
     { platform: 'programmatic', name: 'DSP OpenRTB Gateway', envVar: 'DSP_OPENRTB_SECRET', docsUrl: 'https://www.iab.com/guidelines/openrtb/' },
   ];
 
-  const channelsInfo = platformMeta.map(p => ({
-    ...p,
-    status: credentialVault[p.platform] ? 'LIVE_CREDENTIALS_CONFIGURED' : 'DRY_RUN_NO_CREDENTIALS',
-    accountId: credentialVault[p.platform]?.accountId,
-  }));
+  const channelsInfo = platformMeta.map(p => {
+    const stored = credentialVault[scopedKey(orgId, p.platform)];
+    return {
+      ...p,
+      status: stored ? 'LIVE_CREDENTIALS_CONFIGURED' : 'DRY_RUN_NO_CREDENTIALS',
+      accountId: stored?.accountId,
+    };
+  });
 
   const liveCount = channelsInfo.filter(c => c.status === 'LIVE_CREDENTIALS_CONFIGURED').length;
 
   res.json({
+    mode: liveCount === channelsInfo.length ? 'ALL_LIVE' : liveCount > 0 ? 'HYBRID' : 'DRY_RUN',
     notice:
-      liveCount === 0
-        ? 'No live credentials are configured for any of the 7 channels. Every channel currently dispatches through its adapter\'s DRY_RUN path: real transform + validation logic runs, but no network call reaches Meta/Google/LinkedIn/etc, and no externalId is a real ad ID.'
-        : `${liveCount} of 7 channels have live credentials configured and will dispatch real API calls on publish. The rest remain DRY_RUN until credentials are added.`,
-    userInstructions: 'Provide Channel API credentials in the API Nexus panel (they are encrypted server-side with AES-256-GCM before storage, never sent back to the browser in plaintext).',
+      liveCount === channelsInfo.length
+        ? 'All channels have vault credentials configured -- campaign publish will make real API calls.'
+        : liveCount > 0
+        ? `Hybrid mode: ${liveCount}/${channelsInfo.length} channels configured. Configured channels dispatch live; unconfigured run dry-run.`
+        : 'Dry-run mode active for all channels -- no platform credentials configured in vault. Publish will run real transforms and validations, then issue dry-run identifiers without contacting external ad networks.',
     channels: channelsInfo,
   });
 });
@@ -1223,10 +1302,10 @@ Return JSON matching the specific character limits and ad specs for ${platform}.
 // Real budget reallocation endpoint
 app.post('/api/budget/reallocate', (req, res) => {
   try {
-    const { totalBudget, currentSpend, history, constraints, stepCount } = req.body as {
-      totalBudget: number;
-      currentSpend: Record<string, number>;
+    const { history, currentSpend, totalBudget, constraints, stepCount } = req.body as {
       history: Record<string, { spend: number; normalizedConversions: number }[]>;
+      currentSpend: Record<string, number>;
+      totalBudget: number;
       constraints: {
         platform: string;
         minSharePct: number;
@@ -1236,9 +1315,17 @@ app.post('/api/budget/reallocate', (req, res) => {
       stepCount?: number;
     };
 
-    if (!totalBudget || !constraints?.length) {
-      return res.status(400).json({ error: 'totalBudget and constraints are required' });
-    }
+    requireFiniteNumber(totalBudget, 'totalBudget', { min: 0 });
+    const constraintsArr = requireArray(constraints, 'constraints', { minLength: 1 });
+    constraintsArr.forEach((c: any, i: number) => {
+      requireString(c?.platform, `constraints[${i}].platform`);
+      requireFiniteNumber(c?.minSharePct, `constraints[${i}].minSharePct`, { min: 0, max: 100 });
+      requireFiniteNumber(c?.maxSharePct, `constraints[${i}].maxSharePct`, { min: 0, max: 100 });
+      requireFiniteNumber(c?.valuePerConversion, `constraints[${i}].valuePerConversion`, { min: 0 });
+      if (c.minSharePct > c.maxSharePct) {
+        throw new ValidationError(`constraints[${i}]: minSharePct (${c.minSharePct}) cannot exceed maxSharePct (${c.maxSharePct}).`);
+      }
+    });
 
     const plan = computeBudgetReallocation(
       history as any,
@@ -1249,6 +1336,9 @@ app.post('/api/budget/reallocate', (req, res) => {
     );
     res.json(plan);
   } catch (err: any) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Budget reallocation failed', details: err.message });
   }
 });
@@ -1262,12 +1352,24 @@ app.post('/api/ab-test/evaluate', (req, res) => {
       alpha?: number;
       minimumDetectableEffectRel?: number;
     };
-    if (!control || !variants) {
-      return res.status(400).json({ error: 'control and variants are required' });
-    }
+    const controlObj = requireObject(control, 'control');
+    requireString(controlObj.id, 'control.id');
+    requireFiniteNumber(controlObj.impressions, 'control.impressions', { min: 0 });
+    requireFiniteNumber(controlObj.conversions, 'control.conversions', { min: 0 });
+
+    const variantsArr = requireArray(variants, 'variants', { minLength: 1 });
+    variantsArr.forEach((v: any, i: number) => {
+      requireString(v?.id, `variants[${i}].id`);
+      requireFiniteNumber(v?.impressions, `variants[${i}].impressions`, { min: 0 });
+      requireFiniteNumber(v?.conversions, `variants[${i}].conversions`, { min: 0 });
+    });
+
     const results = evaluateAbTest(control, variants, { alpha, minimumDetectableEffectRel });
     res.json({ results });
   } catch (err: any) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Significance evaluation failed', details: err.message });
   }
 });
@@ -1280,15 +1382,24 @@ app.post('/api/creatives/:creativeId/fatigue', (req, res) => {
       baselineFraction?: number;
       recentWindowDays?: number;
     };
-    if (!history?.length) {
-      return res.status(400).json({ error: 'history is required' });
-    }
+    const historyArr = requireArray(history, 'history', { minLength: 1 });
+    historyArr.forEach((h: any, i: number) => {
+      requireString(h?.date, `history[${i}].date`);
+      requireFiniteNumber(h?.impressions, `history[${i}].impressions`, { min: 0 });
+      requireFiniteNumber(h?.clicks, `history[${i}].clicks`, { min: 0 });
+      requireFiniteNumber(h?.conversions, `history[${i}].conversions`, { min: 0 });
+      requireFiniteNumber(h?.spend, `history[${i}].spend`, { min: 0 });
+    });
+
     const assessment = assessCreativeFatigue(req.params.creativeId, history, { baselineFraction, recentWindowDays });
     if (!assessment) {
       return res.json({ status: 'insufficient_data', message: 'Not enough performance history yet to assess fatigue.' });
     }
     res.json(assessment);
   } catch (err: any) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Fatigue assessment failed', details: err.message });
   }
 });
@@ -1312,9 +1423,33 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Vantage AdEngine server running on http://0.0.0.0:${PORT}`);
   });
+
+  const SHUTDOWN_TIMEOUT_MS = 15_000;
+
+  function shutdown(signal: string) {
+    console.log(`\n[shutdown] Received ${signal}, draining in-flight requests...`);
+    const forceExitTimer = setTimeout(() => {
+      console.warn('[shutdown] Timed out waiting for in-flight requests; forcing exit.');
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    forceExitTimer.unref();
+
+    server.close(err => {
+      clearTimeout(forceExitTimer);
+      if (err) {
+        console.error('[shutdown] Error while closing server:', err);
+        process.exit(1);
+      }
+      console.log('[shutdown] All connections drained; exiting cleanly.');
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer();

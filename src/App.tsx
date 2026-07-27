@@ -14,7 +14,7 @@ import { InvoiceModal } from './components/InvoiceModal';
 import { CampaignDetailModal } from './components/CampaignDetailModal';
 import { DispatchReportBanner, DispatchReportUI } from './components/DispatchReportBanner';
 
-import { Campaign, ChannelApiStatus, Invoice, PerformanceTimePoint, PlatformType } from './types';
+import { Campaign, ChannelApiStatus, Invoice, InvoiceAuditLogEntry, PerformanceTimePoint, PlatformType } from './types';
 import { 
   Organization, 
   INITIAL_ORGANIZATIONS, 
@@ -157,7 +157,7 @@ export function App() {
       const idempotencyKey = `pub_${campaignId}_${crypto.randomUUID()}`;
       const res = await fetch(`/api/campaigns/${campaignId}/publish`, {
         method: 'POST',
-        headers: { 'Idempotency-Key': idempotencyKey },
+        headers: { 'Idempotency-Key': idempotencyKey, 'X-Org-Id': currentOrgId },
       });
       const data = await res.json();
 
@@ -299,11 +299,24 @@ export function App() {
       setInvoices(prev =>
         prev.map(inv => {
           if (inv.id === invoiceId) {
-            const updated = {
+            const nowFormatted = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+            const newAuditEntry: InvoiceAuditLogEntry = {
+              id: `aud-${Date.now()}`,
+              timestamp: nowFormatted,
+              previousStatus: inv.status,
+              newStatus: 'PAID',
+              action: 'Payment Cleared & Settled',
+              paymentMethod: method,
+              txHash: hash,
+              actor: 'Finance Admin',
+              notes: 'Settled via Financial Ledger instant payout gateway',
+            };
+            const updated: Invoice = {
               ...inv,
               status: 'PAID' as const,
               paymentMethod: method,
               txHash: hash,
+              auditLog: [...(inv.auditLog || []), newAuditEntry],
             };
             updateInvoiceStatusInFirestore(currentOrgId, invoiceId, 'PAID', method, hash);
             return updated;
@@ -497,6 +510,7 @@ export function App() {
                 <ApiNexus
                   channels={channels}
                   onTestChannel={handleTestChannel}
+                  orgId={currentOrgId}
                 />
               )}
 

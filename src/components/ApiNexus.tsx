@@ -72,9 +72,10 @@ export interface NotificationSettings {
 interface ApiNexusProps {
   channels: ChannelApiStatus[];
   onTestChannel: (platform: PlatformType) => Promise<any>;
+  orgId?: string;
 }
 
-export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) => {
+export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, orgId = 'org-astracloud' }) => {
   const [activeTab, setActiveTab] = useState<'suite' | 'credentials' | 'ai-payload' | 'gateways' | 'alerts'>('suite');
 
   // Active Role Simulation for RBAC
@@ -320,7 +321,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
 
   const refreshDispatchModeInfo = async () => {
     try {
-      const res = await fetch('/api/channels/credentials-info');
+      const res = await fetch('/api/channels/credentials-info', { headers: { 'X-Org-Id': orgId } });
       setDispatchModeInfo(await res.json());
     } catch (err) {
       console.warn('Could not load dispatch mode info:', err);
@@ -389,7 +390,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
 
       const res = await fetch('/api/vault/encrypt', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Org-Id': orgId },
         body: JSON.stringify({
           platform,
           accountId: cred.accountId,
@@ -586,7 +587,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel }) =
 
       const vaultRes = await fetch('/api/vault/encrypt', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Org-Id': orgId },
         body: JSON.stringify({
           platform,
           accountId: credToSave.accountId,

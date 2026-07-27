@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Invoice } from '../types';
+import { Invoice, InvoiceAuditLogEntry } from '../types';
+import { InvoiceAuditLogModal } from './InvoiceAuditLogModal';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { 
   Receipt, 
@@ -12,7 +13,8 @@ import {
   Building,
   FileText,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  History
 } from 'lucide-react';
 
 interface FinancialLedgerProps {
@@ -27,15 +29,45 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
   onPayInvoice,
 }) => {
   const [filter, setFilter] = useState<'all' | 'PAID' | 'PENDING'>('all');
+  const [auditInvoice, setAuditInvoice] = useState<Invoice | null>(null);
+  const [localInvoices, setLocalInvoices] = useState<Invoice[]>(invoices);
 
-  const filteredInvoices = invoices.filter(inv => filter === 'all' || inv.status === filter);
+  // Keep localInvoices in sync with prop updates
+  React.useEffect(() => {
+    setLocalInvoices(invoices);
+  }, [invoices]);
 
-  const totalInvoiced = invoices.reduce((acc, i) => acc + i.amount, 0);
-  const totalPaid = invoices.filter(i => i.status === 'PAID').reduce((acc, i) => acc + i.amount, 0);
-  const totalPending = invoices.filter(i => i.status === 'PENDING').reduce((acc, i) => acc + i.amount, 0);
+  const handleAddAuditLogEntry = (invoiceId: string, entry: Omit<InvoiceAuditLogEntry, 'id'>) => {
+    const newEntry: InvoiceAuditLogEntry = {
+      ...entry,
+      id: `aud-${Date.now()}`,
+    };
 
-  const paidCount = invoices.filter(i => i.status === 'PAID').length;
-  const pendingCount = invoices.filter(i => i.status === 'PENDING').length;
+    setLocalInvoices(prev =>
+      prev.map(inv => {
+        if (inv.id === invoiceId) {
+          const updated = {
+            ...inv,
+            auditLog: [...(inv.auditLog || []), newEntry],
+          };
+          if (auditInvoice?.id === invoiceId) {
+            setAuditInvoice(updated);
+          }
+          return updated;
+        }
+        return inv;
+      })
+    );
+  };
+
+  const filteredInvoices = localInvoices.filter(inv => filter === 'all' || inv.status === filter);
+
+  const totalInvoiced = localInvoices.reduce((acc, i) => acc + i.amount, 0);
+  const totalPaid = localInvoices.filter(i => i.status === 'PAID').reduce((acc, i) => acc + i.amount, 0);
+  const totalPending = localInvoices.filter(i => i.status === 'PENDING').reduce((acc, i) => acc + i.amount, 0);
+
+  const paidCount = localInvoices.filter(i => i.status === 'PAID').length;
+  const pendingCount = localInvoices.filter(i => i.status === 'PENDING').length;
 
   const chartData = [
     { name: 'PAID', value: totalPaid, count: paidCount },
@@ -221,17 +253,25 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
                   <td className="py-3.5 px-4 text-right text-stone-200 font-bold">
                     ${inv.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
-                  <td className="py-3.5 px-4 text-right space-x-2">
+                  <td className="py-3.5 px-4 text-right space-x-1.5">
+                    <button
+                      onClick={() => setAuditInvoice(inv)}
+                      className="px-2.5 py-1 bg-amber-400/10 border border-amber-400/30 text-amber-300 hover:text-amber-200 hover:bg-amber-400/20 rounded-xs cursor-pointer text-[11px] font-mono font-bold inline-flex items-center gap-1 transition-colors"
+                      title="View payment status audit log & history"
+                    >
+                      <History className="w-3 h-3 text-amber-400" />
+                      <span>Audit Log</span>
+                    </button>
                     <button
                       onClick={() => onSelectInvoice(inv)}
-                      className="px-2.5 py-1 bg-stone-900 border border-stone-800 text-stone-300 hover:text-white rounded-xs cursor-pointer text-[11px]"
+                      className="px-2.5 py-1 bg-stone-900 border border-stone-800 text-stone-300 hover:text-white rounded-xs cursor-pointer text-[11px] font-mono"
                     >
                       Receipt
                     </button>
                     {inv.status === 'PENDING' && (
                       <button
                         onClick={() => onPayInvoice(inv.id)}
-                        className="px-2.5 py-1 bg-amber-400 text-black font-bold rounded-xs cursor-pointer text-[11px] hover:bg-amber-300"
+                        className="px-2.5 py-1 bg-amber-400 text-black font-bold rounded-xs cursor-pointer text-[11px] font-mono hover:bg-amber-300"
                       >
                         Settle
                       </button>
@@ -265,6 +305,16 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
           ))}
         </div>
       </div>
+
+      {/* Invoice Audit Log Modal */}
+      {auditInvoice && (
+        <InvoiceAuditLogModal
+          invoice={auditInvoice}
+          onClose={() => setAuditInvoice(null)}
+          onAddAuditLogEntry={handleAddAuditLogEntry}
+          onPayInvoice={onPayInvoice}
+        />
+      )}
 
     </div>
   );

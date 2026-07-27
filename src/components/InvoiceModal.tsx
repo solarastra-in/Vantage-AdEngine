@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Invoice } from '../types';
-import { X, Printer, Download, CheckCircle2, ShieldCheck, FileText, Layers, Mail, Send } from 'lucide-react';
+import { X, Printer, Download, CheckCircle2, ShieldCheck, FileText, Layers, Mail, Send, FileDown } from 'lucide-react';
+import jsPDF from 'jspdf';
 
 interface InvoiceModalProps {
   invoice: Invoice | null;
@@ -11,11 +12,197 @@ interface InvoiceModalProps {
 export const InvoiceModal: React.FC<InvoiceModalProps> = ({ invoice, onClose, onPayInvoice }) => {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [reminderSent, setReminderSent] = useState(false);
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
 
   if (!invoice) return null;
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadPDF = () => {
+    if (!invoice) return;
+    setDownloadingPDF(true);
+
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      // Colors
+      const borderGray = [220, 220, 220];
+      const textMuted = [100, 100, 100];
+
+      // Header Banner
+      doc.setFillColor(15, 15, 15);
+      doc.rect(0, 0, 210, 32, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(255, 255, 255);
+      doc.text('VANTAGE ADENGINE INC.', 15, 18);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(180, 180, 180);
+      doc.text('100 Digital Boulevard, Suite 800 | San Francisco, CA 94105', 15, 25);
+
+      // Status Badge
+      const isPaid = invoice.status === 'PAID';
+      if (isPaid) {
+        doc.setFillColor(16, 185, 129); // emerald
+      } else {
+        doc.setFillColor(217, 119, 6); // amber
+      }
+      doc.roundedRect(148, 10, 47, 12, 2, 2, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text(`STATUS: ${invoice.status}`, 171.5, 17.5, { align: 'center' });
+
+      // Invoice Title & ID
+      let y = 44;
+      doc.setTextColor(20, 20, 20);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`TAX INVOICE ${invoice.id}`, 15, y);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+      doc.text(`Official Media Settlement Statement`, 195, y, { align: 'right' });
+
+      y += 6;
+      doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+      doc.line(15, y, 195, y);
+
+      // Billing & Campaign Meta Box
+      y += 8;
+      doc.setFillColor(248, 249, 250);
+      doc.setDrawColor(230, 230, 230);
+      doc.roundedRect(15, y, 180, 34, 2, 2, 'FD');
+
+      // Left Column: Customer
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(120, 120, 120);
+      doc.text('BILLED TO ENTITY:', 20, y + 8);
+
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(20, 20, 20);
+      doc.text(invoice.customerName, 20, y + 15);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(80, 80, 80);
+      doc.text(invoice.customerEmail, 20, y + 21);
+      doc.text(`Campaign: ${invoice.campaignName}`, 20, y + 27);
+
+      // Right Column: Dates
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(120, 120, 120);
+      doc.text('INVOICE TIMELINE:', 110, y + 8);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(40, 40, 40);
+      doc.text(`Issued Date:  ${invoice.issuedDate}`, 110, y + 15);
+      doc.text(`Payment Due:  ${invoice.dueDate}`, 110, y + 21);
+      if (invoice.paymentMethod) {
+        doc.text(`Method:          ${invoice.paymentMethod}`, 110, y + 27);
+      }
+
+      // Breakdown Section Header
+      y += 44;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(20, 20, 20);
+      doc.text('CAMPAIGN MEDIA SPEND & PLATFORM FEE BREAKDOWN', 15, y);
+
+      y += 5;
+      // Table Header Row
+      doc.setFillColor(30, 30, 30);
+      doc.rect(15, y, 180, 8, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text('Ad Channel / Service Description', 20, y + 5.5);
+      doc.text('Amount (USD)', 190, y + 5.5, { align: 'right' });
+
+      y += 8;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(40, 40, 40);
+
+      invoice.breakdown.forEach((item, idx) => {
+        if (idx % 2 === 1) {
+          doc.setFillColor(246, 246, 246);
+          doc.rect(15, y, 180, 8, 'F');
+        }
+        doc.setDrawColor(240, 240, 240);
+        doc.line(15, y + 8, 195, y + 8);
+
+        doc.text(item.platform, 20, y + 5.5);
+        doc.text(`$${item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 190, y + 5.5, { align: 'right' });
+        y += 8;
+      });
+
+      // Totals Box
+      y += 6;
+      doc.setDrawColor(200, 200, 200);
+      doc.line(120, y, 195, y);
+
+      y += 6;
+      doc.setFontSize(8.5);
+      doc.setTextColor(80, 80, 80);
+      doc.text('Media Spend Subtotal:', 120, y);
+      doc.text(`$${invoice.mediaSpend.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 190, y, { align: 'right' });
+
+      y += 6;
+      doc.text('Platform Management Fee (10%):', 120, y);
+      doc.text(`$${invoice.platformFee.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 190, y, { align: 'right' });
+
+      y += 8;
+      doc.setFillColor(245, 245, 240);
+      doc.rect(120, y - 4, 75, 10, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(20, 20, 20);
+      doc.text('TOTAL AMOUNT DUE:', 122, y + 2.5);
+      doc.text(`$${invoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 190, y + 2.5, { align: 'right' });
+
+      // Verification / Footer Stamp
+      y += 32;
+      doc.setDrawColor(220, 220, 220);
+      doc.line(15, y, 195, y);
+
+      y += 6;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(120, 120, 120);
+      doc.text('VANTAGE ADENGINE FINTECH SYSTEM - CRYPTOGRAPHICALLY STAMPED DOCUMENT', 15, y);
+
+      y += 4;
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Generated on ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC`, 15, y);
+      doc.text(`Document ID: ${invoice.id}-OFFICIAL-PDF`, 195, y, { align: 'right' });
+
+      if (invoice.txHash) {
+        y += 4;
+        doc.text(`Transaction Settlement Hash: ${invoice.txHash}`, 15, y);
+      }
+
+      doc.save(`Invoice_${invoice.id}.pdf`);
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+    } finally {
+      setTimeout(() => setDownloadingPDF(false), 500);
+    }
   };
 
   const handleSendEmailReminder = () => {
@@ -51,11 +238,21 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ invoice, onClose, on
             )}
 
             <button
+              onClick={handleDownloadPDF}
+              disabled={downloadingPDF}
+              className="px-2.5 py-1.5 bg-amber-400/10 border border-amber-400/30 text-amber-300 hover:bg-amber-400/20 hover:text-amber-200 rounded-xs cursor-pointer text-xs font-mono flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              title="Generate & Download formal PDF invoice document"
+            >
+              <FileDown className="w-3.5 h-3.5 text-amber-400" />
+              <span>{downloadingPDF ? 'Generating PDF...' : 'Download PDF'}</span>
+            </button>
+
+            <button
               onClick={handlePrint}
               className="p-1.5 bg-stone-900 border border-stone-800 text-stone-300 hover:text-white rounded-xs cursor-pointer text-xs font-mono flex items-center gap-1.5"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>Print / PDF</span>
+              <span>Print</span>
             </button>
 
             <button

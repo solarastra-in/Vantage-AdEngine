@@ -63,6 +63,7 @@ export interface AbTestConfig {
 
 export interface Campaign {
   id: string;
+  orgId?: string; // tenant scoping -- defaults to DEFAULT_ORG_ID server-side if absent (src/lib/tenantContext.server.ts)
   name: string;
   objective: 'Brand Awareness' | 'Lead Generation' | 'E-commerce Conversions' | 'App Installs' | 'Website Traffic';
   status: 'draft' | 'publishing' | 'active' | 'paused' | 'completed';
@@ -98,6 +99,18 @@ export interface ChannelApiStatus {
   totalSpent: number;
 }
 
+export interface InvoiceAuditLogEntry {
+  id: string;
+  timestamp: string;
+  previousStatus?: 'DRAFT' | 'ISSUED' | 'PENDING' | 'PAID' | 'OVERDUE';
+  newStatus: 'DRAFT' | 'ISSUED' | 'PENDING' | 'PAID' | 'OVERDUE';
+  action: string;
+  paymentMethod?: string;
+  txHash?: string;
+  actor: string;
+  notes?: string;
+}
+
 export interface Invoice {
   id: string;
   campaignId: string;
@@ -116,6 +129,7 @@ export interface Invoice {
     platform: string;
     amount: number;
   }[];
+  auditLog?: InvoiceAuditLogEntry[];
 }
 
 export interface PerformanceTimePoint {
