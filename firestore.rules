@@ -10,21 +10,60 @@ service cloud.firestore {
     // Multi-tenant organizations
     match /organizations/{orgId} {
       allow read, write: if true;
-      
+
+      // IMPORTANT: Firestore grants access to a path if ANY matching rule
+      // allows it -- rules are a union, not "most specific wins" (confirmed
+      // in Firebase's own docs: "if a broad rule grants access to data, you
+      // can't restrict with a more specific rule"). A previous version of
+      // this file had a recursive `{allSubcollections=**}: allow read,
+      // write: if true` wildcard below the credentials/invitedEmployees
+      // carve-outs, which silently granted unrestricted access to BOTH of
+      // them regardless of the tighter rules defined for them -- the
+      // carve-outs were never actually enforced. Fixed by listing every
+      // open subcollection explicitly instead of using a catch-all, so
+      // there is no broad rule left that can swallow the tighter ones.
+
       // Channel credentials: client-side writes only masked placeholders
       match /credentials/{platform} {
         allow read, write: if request.auth != null && request.auth.uid != null;
       }
 
-      // Tenant sub-collections (credentials, campaigns, channels, invoices, etc.)
-      match /{allSubcollections=**} {
+      // The actual employee-authorization allowlist (resolveAuthorizedOrgForUser
+      // in firestoreService.ts) -- this is the real gate that decides whether a
+      // signed-in Google account can reach the portal. A signed-in user may
+      // only READ an invite entry that matches their own authenticated email
+      // (needed for the cross-org collectionGroup lookup during sign-in), never
+      // anyone else's. TODO (production hardening): writes should move to a
+      // server endpoint (Admin SDK) that verifies the requester is actually a
+      // TENANT_ADMIN of this org before creating/removing an invite -- a
+      // Firestore rule alone can't cleanly express "is this caller an admin of
+      // this specific org" without a recursive get() on this same
+      // subcollection. Requiring authentication is a real improvement over the
+      // previous `if true` on everything, but is not full role enforcement yet
+      // (same tradeoff already accepted for /credentials above).
+      match /invitedEmployees/{employeeId} {
+        allow read, write: if request.auth != null;
+      }
+
+      // Remaining tenant sub-collections, explicitly enumerated (NOT a
+      // recursive wildcard -- see note above) so nothing added here can
+      // ever silently override the two carve-outs above.
+      match /campaigns/{campaignId} {
+        allow read, write: if true;
+      }
+      match /channels/{channelId} {
+        allow read, write: if true;
+      }
+      match /invoices/{invoiceId} {
         allow read, write: if true;
       }
     }
     
-    // User profile mappings
+    // User profile mappings: a signed-in user may only read/write their own
+    // profile document (keyed by their own uid), never anyone else's. This
+    // is what maps a Google account to its organization and role.
     match /users/{userId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
   }
 }

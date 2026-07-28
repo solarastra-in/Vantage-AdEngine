@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import React, { useState } from 'react';
 import { 
   Sparkles, 
@@ -21,13 +22,21 @@ import {
   Layers2
 } from 'lucide-react';
 import { submitContactLeadToFirestore } from '../lib/firestoreService';
-import { signInWithGoogle } from '../lib/firebase';
 
 interface LandingPageProps {
   onNavigateToPortal: () => void;
   onSelectPlanAndOnboard?: (planName: 'Starter' | 'Growth' | 'Enterprise') => void;
   onLoginSuperAdminDemo?: () => void;
   onLoginTenantAdminDemo?: () => void;
+  /** True once the currently signed-in account has cleared real employee authorization (or an active demo session). */
+  isAuthorized: boolean;
+  /** Set by App.tsx when a Google sign-in succeeds but the account isn't an authorized employee of any organization. */
+  authDeniedMessage: string | null;
+  onDismissAuthDenied: () => void;
+  /** Normal employee sign-in -- resolution against the invitedEmployees allowlist happens in App.tsx. */
+  onGoogleSignIn: () => Promise<void>;
+  /** Customer onboarding sign-in -- creates a brand-new organization with this name and makes the signing-in user its first admin. */
+  onGoogleSignInForOnboarding: (orgName: string) => Promise<void>;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -35,6 +44,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onSelectPlanAndOnboard,
   onLoginSuperAdminDemo,
   onLoginTenantAdminDemo,
+  isAuthorized,
+  authDeniedMessage,
+  onDismissAuthDenied,
+  onGoogleSignIn,
+  onGoogleSignInForOnboarding,
 }) => {
   // Contact Form State
   const [fullName, setFullName] = useState('');
@@ -48,6 +62,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   // Auth Modal State
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [selectedPlanModal, setSelectedPlanModal] = useState<'Starter' | 'Growth' | 'Enterprise' | null>(null);
+  /** Which tab the auth modal is showing -- sign in as an existing employee, or onboard a brand new customer organization. */
+  const [authTab, setAuthTab] = useState<'signin' | 'onboard'>('signin');
+  const [onboardOrgName, setOnboardOrgName] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authFlowError, setAuthFlowError] = useState<string | null>(null);
+
+  // Show demo shortcuts only outside production builds -- these bypass
+  // real authentication entirely and should never ship as a live backdoor.
+  // Note: process.env is NOT available in client-side code under this
+  // Vite config (no process polyfill defined) -- import.meta.env is
+  // Vite's native equivalent and always works in the browser bundle.
+  const showDemoShortcuts = !import.meta.env.PROD;
 
   // Calculator State
   const [monthlyBudgetCalc, setMonthlyBudgetCalc] = useState<number>(50000);
@@ -79,12 +105,51 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     }
   };
 
+  /** "Continue with Google" on the Sign In tab -- for existing, already-invited employees. */
   const handleGoogleAuth = async () => {
+    setAuthFlowError(null);
+    setIsAuthenticating(true);
     try {
-      await signInWithGoogle();
-      onNavigateToPortal();
+      await onGoogleSignIn();
+      // Resolution (authorized vs not) happens in App.tsx's auth-state
+      // effect; this modal closes either way since the outcome is shown
+      // via isAuthorized / authDeniedMessage once the effect resolves.
+      setShowAuthModal(false);
     } catch (err) {
       console.error('Google Sign in:', err);
+      setAuthFlowError('Something went wrong signing in with Google. Please try again.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  /** "Continue with Google" on the Create Organization tab -- for a brand-new customer. */
+  const handleGoogleOnboarding = async () => {
+    if (!onboardOrgName.trim()) {
+      setAuthFlowError('Enter your organization name first.');
+      return;
+    }
+    setAuthFlowError(null);
+    setIsAuthenticating(true);
+    try {
+      await onGoogleSignInForOnboarding(onboardOrgName.trim());
+      setShowAuthModal(false);
+      setOnboardOrgName('');
+    } catch (err) {
+      console.error('Google onboarding error:', err);
+      setAuthFlowError('Something went wrong creating your organization. Please try again.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  /** Launch App / Launch Enterprise Portal CTAs -- gated on real authorization instead of navigating unconditionally. */
+  const handleLaunchClick = () => {
+    if (isAuthorized) {
+      onNavigateToPortal();
+    } else {
+      setAuthTab('signin');
+      setShowAuthModal(true);
     }
   };
 
@@ -95,7 +160,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
         <span>Vantage AdEngine v4.2 Release: Single-Click Cross-Platform API Dispatch now live across 7 Channels</span>
         <button 
-          onClick={onNavigateToPortal} 
+          onClick={handleLaunchClick} 
           className="underline hover:text-amber-200 cursor-pointer font-bold ml-2"
         >
           Launch Enterprise Portal &rarr;
@@ -134,7 +199,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Sign In
             </button>
             <button
-              onClick={onNavigateToPortal}
+              onClick={handleLaunchClick}
               className="bg-amber-400 text-black px-5 py-2.5 text-xs font-extrabold uppercase tracking-widest hover:bg-amber-300 transition-colors cursor-pointer rounded-sm flex items-center gap-2 shadow-lg shadow-amber-400/10"
             >
               <span>Launch App</span>
@@ -167,6 +232,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <button
               onClick={() => {
                 setSelectedPlanModal('Growth');
+                setAuthTab('onboard');
                 setShowAuthModal(true);
               }}
               className="w-full sm:w-auto bg-amber-400 text-black px-8 py-4 text-xs font-extrabold uppercase tracking-widest hover:bg-amber-300 transition-colors cursor-pointer rounded-sm flex items-center justify-center gap-3 shadow-xl shadow-amber-400/15"
@@ -176,7 +242,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </button>
 
             <button
-              onClick={onNavigateToPortal}
+              onClick={handleLaunchClick}
               className="w-full sm:w-auto bg-stone-900 border border-stone-700 text-stone-200 px-8 py-4 text-xs font-bold uppercase tracking-widest hover:bg-stone-800 transition-colors cursor-pointer rounded-sm flex items-center justify-center gap-2"
             >
               <Terminal className="w-4 h-4 text-amber-400" />
@@ -427,7 +493,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
 
                   <button
-                    onClick={onNavigateToPortal}
+                    onClick={handleLaunchClick}
                     className="mt-6 w-full bg-amber-400 text-black py-3 text-xs font-bold uppercase tracking-widest hover:bg-amber-300 transition-colors cursor-pointer rounded-sm flex items-center justify-center gap-2"
                   >
                     <span>Launch Campaign Strategy</span>
@@ -755,7 +821,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
 
           <div className="flex items-center space-x-4">
-            <button onClick={onNavigateToPortal} className="hover:text-amber-400 underline cursor-pointer">Portal</button>
+            <button onClick={handleLaunchClick} className="hover:text-amber-400 underline cursor-pointer">Portal</button>
             <a href="#privacy" className="hover:text-amber-400">Privacy</a>
             <a href="#terms" className="hover:text-amber-400">Terms</a>
           </div>
@@ -767,7 +833,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="fixed inset-0 bg-black/80 z-50 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-stone-900 border border-stone-800 rounded max-w-md w-full p-6 sm:p-8 relative">
             <button 
-              onClick={() => setShowAuthModal(false)}
+              onClick={() => { setShowAuthModal(false); setAuthFlowError(null); }}
               className="absolute top-4 right-4 text-stone-400 hover:text-white p-1"
             >
               <X className="w-5 h-5" />
@@ -778,17 +844,66 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <Lock className="w-6 h-6" />
               </div>
               <h3 className="text-xl font-bold text-white uppercase tracking-wide">
-                {selectedPlanModal ? `Onboard Plan: ${selectedPlanModal}` : 'Sign In to Vantage'}
+                {authTab === 'onboard'
+                  ? selectedPlanModal ? `Create Your Organization -- ${selectedPlanModal}` : 'Create Your Organization'
+                  : 'Sign In to Vantage'}
               </h3>
               <p className="text-xs text-stone-400 mt-1">
-                Access your multi-tenant ad manager workspace using Google Auth or Instant Demo.
+                {authTab === 'onboard'
+                  ? "You'll become the first admin of your organization -- invite your team once you're in."
+                  : 'Only email addresses your organization has authorized as employees can sign in.'}
               </p>
             </div>
 
-            <div className="space-y-4">
+            {/* Tabs: existing employee vs brand-new customer */}
+            <div className="flex mb-5 border border-stone-800 rounded overflow-hidden text-[10px] font-mono font-bold uppercase tracking-wider">
               <button
-                onClick={handleGoogleAuth}
-                className="w-full bg-white text-black py-3 px-4 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-3 hover:bg-stone-200 transition-colors cursor-pointer"
+                onClick={() => { setAuthTab('signin'); setAuthFlowError(null); }}
+                className={`flex-1 py-2 cursor-pointer transition-colors ${authTab === 'signin' ? 'bg-amber-400 text-black' : 'bg-stone-950 text-stone-400 hover:text-stone-200'}`}
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => { setAuthTab('onboard'); setAuthFlowError(null); }}
+                className={`flex-1 py-2 cursor-pointer transition-colors ${authTab === 'onboard' ? 'bg-amber-400 text-black' : 'bg-stone-950 text-stone-400 hover:text-stone-200'}`}
+              >
+                New Customer
+              </button>
+            </div>
+
+            {authFlowError && (
+              <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded text-rose-300 text-[11px]">
+                {authFlowError}
+              </div>
+            )}
+
+            {authDeniedMessage && (
+              <div className="mb-4 p-3 bg-amber-400/10 border border-amber-400/30 rounded text-amber-400/30 rounded text-amber-300 text-[11px] flex items-start justify-between gap-2">
+                <span>{authDeniedMessage}</span>
+                <button onClick={onDismissAuthDenied} className="shrink-0 text-amber-400/70 hover:text-amber-300">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {authTab === 'onboard' && (
+                <div>
+                  <label className="block text-[10px] font-mono uppercase tracking-wider text-stone-500 mb-1.5">Organization Name</label>
+                  <input
+                    type="text"
+                    value={onboardOrgName}
+                    onChange={(e) => setOnboardOrgName(e.target.value)}
+                    placeholder="Acme Growth Labs"
+                    className="w-full bg-stone-950 border border-stone-800 rounded px-3 py-2.5 text-sm text-white placeholder-stone-600 focus:outline-none focus:border-amber-400/50"
+                  />
+                </div>
+              )}
+
+              <button
+                onClick={authTab === 'onboard' ? handleGoogleOnboarding : handleGoogleAuth}
+                disabled={isAuthenticating}
+                className="w-full bg-white text-black py-3 px-4 rounded text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-3 hover:bg-stone-200 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -796,45 +911,58 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
                 </svg>
-                <span>Continue with Google</span>
+                <span>{isAuthenticating ? 'Signing in...' : authTab === 'onboard' ? 'Continue with Google' : 'Continue with Google'}</span>
               </button>
 
-              <div className="relative py-2">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-stone-800" />
-                </div>
-                <div className="relative flex justify-center text-[10px] font-mono uppercase">
-                  <span className="bg-stone-900 px-2 text-stone-500">Or Instant Demo Access</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {onLoginSuperAdminDemo && (
-                  <button
-                    onClick={() => {
-                      setShowAuthModal(false);
-                      onLoginSuperAdminDemo();
-                    }}
-                    className="w-full bg-stone-800 border border-amber-400/40 text-amber-400 py-2.5 px-3 rounded text-xs font-mono font-bold flex items-center justify-between hover:bg-stone-800/80 cursor-pointer"
-                  >
-                    <span>1. SaaS Super Admin Panel</span>
-                    <ChevronRight className="w-4 h-4" />
+              {authTab === 'signin' && (
+                <p className="text-center text-[10px] text-stone-500">
+                  Not with an organization yet?{' '}
+                  <button onClick={() => { setAuthTab('onboard'); setAuthFlowError(null); }} className="text-amber-400 hover:text-amber-300 underline cursor-pointer">
+                    Create one
                   </button>
-                )}
+                </p>
+              )}
 
-                {onLoginTenantAdminDemo && (
-                  <button
-                    onClick={() => {
-                      setShowAuthModal(false);
-                      onLoginTenantAdminDemo();
-                    }}
-                    className="w-full bg-stone-800 border border-stone-700 text-stone-200 py-2.5 px-3 rounded text-xs font-mono font-bold flex items-center justify-between hover:bg-stone-800/80 cursor-pointer"
-                  >
-                    <span>2. Astra Cloud Tenant Workspace</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
+              {showDemoShortcuts && (onLoginSuperAdminDemo || onLoginTenantAdminDemo) && (
+                <>
+                  <div className="relative py-2">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-stone-800" />
+                    </div>
+                    <div className="relative flex justify-center text-[10px] font-mono uppercase">
+                      <span className="bg-stone-900 px-2 text-stone-500">Dev-Only Instant Demo</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {onLoginSuperAdminDemo && (
+                      <button
+                        onClick={() => {
+                          setShowAuthModal(false);
+                          onLoginSuperAdminDemo();
+                        }}
+                        className="w-full bg-stone-800 border border-amber-400/40 text-amber-400 py-2.5 px-3 rounded text-xs font-mono font-bold flex items-center justify-between hover:bg-stone-800/80 cursor-pointer"
+                      >
+                        <span>1. SaaS Super Admin Panel</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {onLoginTenantAdminDemo && (
+                      <button
+                        onClick={() => {
+                          setShowAuthModal(false);
+                          onLoginTenantAdminDemo();
+                        }}
+                        className="w-full bg-stone-800 border border-stone-700 text-stone-200 py-2.5 px-3 rounded text-xs font-mono font-bold flex items-center justify-between hover:bg-stone-800/80 cursor-pointer"
+                      >
+                        <span>2. Astra Cloud Tenant Workspace</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

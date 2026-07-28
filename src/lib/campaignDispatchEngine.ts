@@ -200,12 +200,37 @@ export interface ResolvedCredential {
   extra?: Record<string, string>;
 }
 
+export interface PlatformPerformanceMetrics {
+  externalId: string;
+  platform: PlatformType;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  spend: number;
+  dateRange: { start: string; end: string };
+  mode: 'LIVE' | 'DRY_RUN';
+}
+
 export interface PlatformAdapter {
   platform: PlatformType;
   /** Returns an external campaign/ad ID on success, or throws on failure. */
   publish(payload: PlatformPayload, credential: ResolvedCredential | null): Promise<{ externalId: string; mode: 'LIVE' | 'DRY_RUN' }>;
   /** Compensating action if a sibling channel fails after this one went live. */
   rollback(externalId: string, credential: ResolvedCredential | null): Promise<void>;
+  /**
+   * Pulls real performance metrics for a previously-published campaign from
+   * the platform's own reporting API. Optional (not every adapter needs to
+   * implement it immediately) so this doesn't force a breaking change on
+   * every existing adapter/test at once -- but every one of the 7 built-in
+   * adapters does implement it (see src/lib/adapters/*.ts). This is the
+   * actual data source the budget optimizer and creative fatigue detector
+   * need to stop deriving history from aggregate snapshots.
+   */
+  fetchPerformance?(
+    externalId: string,
+    credential: ResolvedCredential | null,
+    dateRange: { start: string; end: string }
+  ): Promise<PlatformPerformanceMetrics>;
 }
 
 /**
@@ -249,6 +274,26 @@ export function listRegisteredPlatforms(): PlatformType[] {
   return Object.keys(adapterRegistry) as PlatformType[];
 }
 
+/**
+ * Calls the given platform's fetchPerformance implementation. All 7
+ * built-in adapters implement it; this throws a clear error for any custom
+ * adapter that doesn't (rather than silently returning nothing), so a
+ * missing implementation is loud in server logs instead of a quiet gap in
+ * ingested history.
+ */
+export async function fetchChannelPerformance(
+  platform: PlatformType,
+  externalId: string,
+  credential: ResolvedCredential | null,
+  dateRange: { start: string; end: string }
+): Promise<PlatformPerformanceMetrics> {
+  const adapter = getAdapter(platform);
+  if (!adapter.fetchPerformance) {
+    throw new Error(`Adapter for ${platform} does not implement fetchPerformance.`);
+  }
+  return adapter.fetchPerformance(externalId, credential, dateRange);
+}
+
 function getAdapter(platform: PlatformType): PlatformAdapter {
   return adapterRegistry[platform] ?? makeDryRunAdapter(platform);
 }
@@ -275,7 +320,7 @@ export interface DispatchReport {
  */
 export async function dispatchCampaign(
   campaign: Campaign,
-  credentialResolver: (platform: PlatformType) => ResolvedCredential | null,
+  credentialResolver: (platform: PlatformType) => ResolvedCredential | null | Promise<ResolvedCredential | null>,
   opts: { partialAllowed?: boolean } = {}
 ): Promise<DispatchReport> {
   const startedAt = new Date().toISOString();
@@ -297,7 +342,8 @@ export async function dispatchCampaign(
       }
       const adapter = getAdapter(channel.platform);
       try {
-        const { externalId, mode } = await adapter.publish(payload, credentialResolver(channel.platform));
+        const credential = await credentialResolver(channel.platform);
+        const { externalId, mode } = await adapter.publish(payload, credential);
         return { platform: channel.platform, outcome: 'LIVE' as const, externalId, mode };
       } catch (err: any) {
         return { platform: channel.platform, outcome: 'FAILED' as const, error: err.message };
@@ -317,7 +363,8 @@ export async function dispatchCampaign(
         .filter(r => r.outcome === 'LIVE' && r.externalId)
         .map(async r => {
           try {
-            await getAdapter(r.platform).rollback(r.externalId!, credentialResolver(r.platform));
+            const credential = await credentialResolver(r.platform);
+            await getAdapter(r.platform).rollback(r.externalId!, credential);
             r.outcome = 'ROLLED_BACK';
             r.compensated = true;
           } catch (err: any) {

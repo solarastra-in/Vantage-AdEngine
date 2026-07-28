@@ -6,12 +6,13 @@ import {
   Sparkles, 
   Network, 
   Receipt,
+  Users,
   Layers,
   X,
   Menu
 } from 'lucide-react';
 
-export type NavTab = 'dashboard' | 'campaigns' | 'analytics' | 'ai-studio' | 'api-nexus' | 'financials';
+export type NavTab = 'dashboard' | 'campaigns' | 'analytics' | 'ai-studio' | 'api-nexus' | 'financials' | 'team';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -35,6 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'ai-studio', label: 'AI Ad Studio', icon: <Sparkles className="w-4 h-4 text-amber-400" /> },
     { id: 'api-nexus', label: 'API Nexus', icon: <Network className="w-4 h-4" /> },
     { id: 'financials', label: 'Financial Ledger', icon: <Receipt className="w-4 h-4" /> },
+    { id: 'team', label: 'Team & Access', icon: <Users className="w-4 h-4" /> },
   ];
 
   return (

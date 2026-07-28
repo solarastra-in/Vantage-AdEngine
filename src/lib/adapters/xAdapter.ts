@@ -5,7 +5,7 @@
  */
 
 import { PlatformAdapter, PlatformPayload, ResolvedCredential } from '../campaignDispatchEngine';
-import { dryRunResult, callPlatformApi } from './dryRun';
+import { dryRunResult, dryRunPerformance, callPlatformApi } from './dryRun';
 
 const API_VERSION = '12';
 
@@ -41,5 +41,37 @@ export const xAdapter: PlatformAdapter = {
     if (!credential) return;
     const url = `https://ads-api.x.com/${API_VERSION}/accounts/${credential.accountId}/campaigns/${externalId}`;
     await callPlatformApi(url, { method: 'DELETE', headers: { Authorization: `Bearer ${credential.secret}` } }, 'X Ads API (rollback)');
+  },
+
+  async fetchPerformance(externalId, credential, dateRange) {
+    if (!credential) return dryRunPerformance('x', externalId, dateRange);
+
+    const params = new URLSearchParams({
+      entity: 'CAMPAIGN',
+      entity_ids: externalId,
+      start_time: `${dateRange.start}T00:00:00Z`,
+      end_time: `${dateRange.end}T23:59:59Z`,
+      granularity: 'TOTAL',
+      metric_groups: 'ENGAGEMENT,BILLING',
+    });
+
+    const body = await callPlatformApi(
+      `https://ads-api.x.com/${API_VERSION}/stats/accounts/${credential.accountId}?${params.toString()}`,
+      { method: 'GET', headers: { Authorization: `Bearer ${credential.secret}` } },
+      'X Ads API (stats)'
+    );
+
+    const metrics = body?.data?.[0]?.id_data?.[0]?.metrics ?? {};
+
+    return {
+      externalId,
+      platform: 'x',
+      impressions: Number(metrics.impressions?.[0] ?? 0),
+      clicks: Number(metrics.clicks?.[0] ?? 0),
+      conversions: Number(metrics.conversions?.[0] ?? 0),
+      spend: Number(metrics.billed_charge_local_micro?.[0] ?? 0) / 1_000_000,
+      dateRange,
+      mode: 'LIVE',
+    };
   },
 };

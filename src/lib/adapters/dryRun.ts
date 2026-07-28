@@ -19,13 +19,37 @@
  * not because it's a novel technique.
  */
 
-import { PlatformPayload, ResolvedCredential, hasBlockingErrors } from '../campaignDispatchEngine';
+import { PlatformPayload, ResolvedCredential, PlatformPerformanceMetrics, hasBlockingErrors } from '../campaignDispatchEngine';
 
 export function dryRunResult(platform: string, payload: PlatformPayload) {
   if (hasBlockingErrors(payload)) {
     throw new Error(`Validation failed for ${platform}: ${payload.issues.map(i => i.issue).join('; ')}`);
   }
   return { externalId: `DRYRUN_${platform}_${Date.now()}`, mode: 'DRY_RUN' as const };
+}
+
+/**
+ * Dry-run performance fallback: explicitly zeroed metrics, never fabricated
+ * numbers dressed up as real performance. Downstream consumers (budget
+ * optimizer, fatigue detector) check `mode` and know not to treat these as
+ * a real signal -- this replaces what would otherwise be another
+ * opportunity to accidentally re-introduce fake-but-plausible-looking data.
+ */
+export function dryRunPerformance(
+  platform: any,
+  externalId: string,
+  dateRange: { start: string; end: string }
+): PlatformPerformanceMetrics {
+  return {
+    externalId,
+    platform,
+    impressions: 0,
+    clicks: 0,
+    conversions: 0,
+    spend: 0,
+    dateRange,
+    mode: 'DRY_RUN',
+  };
 }
 
 // ---------------------------------------------------------------------------

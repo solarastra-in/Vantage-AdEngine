@@ -5,7 +5,7 @@
  */
 
 import { PlatformAdapter, PlatformPayload, ResolvedCredential } from '../campaignDispatchEngine';
-import { dryRunResult, callPlatformApi } from './dryRun';
+import { dryRunResult, dryRunPerformance, callPlatformApi } from './dryRun';
 
 const LI_API_VERSION = '202405';
 
@@ -64,5 +64,47 @@ export const linkedinAdapter: PlatformAdapter = {
       },
       'LinkedIn Marketing API (rollback)'
     );
+  },
+
+  async fetchPerformance(externalId, credential, dateRange) {
+    if (!credential) return dryRunPerformance('linkedin', externalId, dateRange);
+
+    const [startY, startM, startD] = dateRange.start.split('-').map(Number);
+    const [endY, endM, endD] = dateRange.end.split('-').map(Number);
+    const params = new URLSearchParams({
+      q: 'analytics',
+      pivot: 'CAMPAIGN',
+      dateRange: JSON.stringify({
+        start: { year: startY, month: startM, day: startD },
+        end: { year: endY, month: endM, day: endD },
+      }),
+      campaigns: `List(urn%3Ali%3AsponsoredCampaign%3A${externalId})`,
+      fields: 'impressions,clicks,costInLocalCurrency,externalWebsiteConversions',
+    });
+
+    const body = await callPlatformApi(
+      `https://api.linkedin.com/rest/adAnalytics?${params.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${credential.secret}`,
+          'LinkedIn-Version': LI_API_VERSION,
+        },
+      },
+      'LinkedIn Marketing API (analytics)'
+    );
+
+    const elements = body?.elements ?? [];
+    const totals = elements.reduce(
+      (acc: any, e: any) => ({
+        impressions: acc.impressions + Number(e.impressions ?? 0),
+        clicks: acc.clicks + Number(e.clicks ?? 0),
+        conversions: acc.conversions + Number(e.externalWebsiteConversions ?? 0),
+        spend: acc.spend + Number(e.costInLocalCurrency ?? 0),
+      }),
+      { impressions: 0, clicks: 0, conversions: 0, spend: 0 }
+    );
+
+    return { externalId, platform: 'linkedin', ...totals, dateRange, mode: 'LIVE' };
   },
 };

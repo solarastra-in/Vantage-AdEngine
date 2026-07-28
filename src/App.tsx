@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { SaaSHeader } from './components/SaaSHeader';
 import { LandingPage } from './components/LandingPage';
@@ -9,6 +9,7 @@ import { MarketIntelligence } from './components/MarketIntelligence';
 import { AiAdStudio } from './components/AiAdStudio';
 import { ApiNexus } from './components/ApiNexus';
 import { FinancialLedger } from './components/FinancialLedger';
+import { TeamManagement } from './components/TeamManagement';
 import { CampaignWizardModal } from './components/CampaignWizardModal';
 import { InvoiceModal } from './components/InvoiceModal';
 import { CampaignDetailModal } from './components/CampaignDetailModal';
@@ -25,9 +26,11 @@ import {
   updateInvoiceStatusInFirestore,
   fetchChannelsFromFirestore,
   saveInvoiceToFirestore,
-  seedFirestoreIfEmpty
+  seedFirestoreIfEmpty,
+  resolveAuthorizedOrgForUser,
+  onboardNewOrganization
 } from './lib/firestoreService';
-import { auth, onAuthStateChanged, signOutUser, User } from './lib/firebase';
+import { auth, onAuthStateChanged, signOutUser, signInWithGoogle, User } from './lib/firebase';
 import { Menu } from 'lucide-react';
 
 export function App() {
@@ -39,6 +42,31 @@ export function App() {
   const [currentOrgId, setCurrentOrgId] = useState<string>('org-astracloud');
   const [userRole, setUserRole] = useState<'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER'>('SUPER_ADMIN');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  /**
+   * Real authentication gate. A signed-in Firebase user alone is NOT
+   * sufficient to reach the portal -- their email must be authorized as an
+   * employee of some organization (resolveAuthorizedOrgForUser in
+   * firestoreService.ts). Previously, "Launch App" skipped this check
+   * entirely (bare setViewState('portal')) and "Continue with Google"
+   * navigated to the portal the instant sign-in succeeded, regardless of
+   * whether that account belonged to any customer of the platform.
+   */
+  const [authStatus, setAuthStatus] = useState<'checking' | 'unauthenticated' | 'not_authorized' | 'authorized'>('checking');
+  const [authDeniedMessage, setAuthDeniedMessage] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false); // true only for the dev-only "Instant Demo" shortcuts
+
+  /**
+   * When a "Create Organization" onboarding flow triggers signInWithGoogle,
+   * this ref is set BEFORE the sign-in call so the onAuthStateChanged
+   * effect below knows to run onboardNewOrganization instead of the normal
+   * "is this email already authorized somewhere" resolution. Without this,
+   * there's a real race: the effect could fire first, find no org and no
+   * invite yet (since the org doesn't exist until onboarding creates it),
+   * and sign the brand-new user back out before onboarding gets a chance
+   * to run.
+   */
+  const pendingOnboardingOrgNameRef = useRef<string | null>(null);
 
   // Portal Nav State
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
@@ -58,13 +86,92 @@ export function App() {
   const [timeSeries, setTimeSeries] = useState<PerformanceTimePoint[]>([]);
   const [activeDispatchReport, setActiveDispatchReport] = useState<DispatchReportUI | null>(null);
 
-  // Monitor Firebase Auth State
+  // Monitor Firebase Auth State AND resolve real employee authorization.
+  // This replaces the old handler, which only ever set currentUser and let
+  // the caller navigate unconditionally.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+
+      if (demoMode) return; // demo shortcuts manage their own state directly
+
+      if (!user) {
+        setAuthStatus('unauthenticated');
+        return;
+      }
+
+      setAuthStatus('checking');
+
+      // Onboarding path: this sign-in was triggered by "Create Organization",
+      // not a normal login -- create the org instead of looking one up.
+      if (pendingOnboardingOrgNameRef.current) {
+        const orgName = pendingOnboardingOrgNameRef.current;
+        pendingOnboardingOrgNameRef.current = null;
+        try {
+          const profile = await onboardNewOrganization(orgName, user.uid, user.email ?? '', user.displayName ?? '');
+          setAuthDeniedMessage(null);
+          setCurrentOrgId(profile.orgId);
+          setUserRole(profile.role);
+          setAuthStatus('authorized');
+          setViewState('portal');
+        } catch (err) {
+          console.error('Organization onboarding error:', err);
+          await signOutUser();
+          setCurrentUser(null);
+          setAuthStatus('unauthenticated');
+          setAuthDeniedMessage('Something went wrong creating your organization. Please try again.');
+        }
+        return;
+      }
+
+      const result = await resolveAuthorizedOrgForUser(user.uid, user.email ?? '', user.displayName ?? '');
+
+      if (result.status === 'AUTHORIZED') {
+        setAuthDeniedMessage(null);
+        setCurrentOrgId(result.profile.orgId);
+        setUserRole(result.profile.role);
+        setAuthStatus('authorized');
+        // A returning, already-authorized user reloading the page (or
+        // completing sign-in from the landing page) should land straight
+        // in the portal rather than back at the marketing page.
+        setViewState(prev => (prev === 'landing' ? 'portal' : prev));
+      } else {
+        // This Google account isn't an authorized employee of any
+        // organization on this platform. Do not grant portal access --
+        // revoke the session immediately rather than leaving a
+        // signed-in-but-unauthorized state hanging around.
+        await signOutUser();
+        setCurrentUser(null);
+        setAuthStatus('not_authorized');
+        setAuthDeniedMessage(
+          `${user.email} isn't associated with any Vantage AdEngine organization. Ask your admin to invite you, or create a new organization.`
+        );
+      }
     });
     return () => unsubscribe();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoMode]);
+
+  /** Normal sign-in: resolution happens in the effect above. */
+  const handleGoogleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      console.error('Google sign-in error:', err);
+    }
+  };
+
+  /** Onboarding sign-in: sets the guard ref first so the effect above creates a new org instead of looking one up. */
+  const handleGoogleSignInForOnboarding = async (orgName: string) => {
+    pendingOnboardingOrgNameRef.current = orgName;
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      pendingOnboardingOrgNameRef.current = null;
+      console.error('Google sign-in (onboarding) error:', err);
+      throw err;
+    }
+  };
 
   // Fetch Organizations & Initial Seed
   const loadOrganizations = async () => {
@@ -377,12 +484,25 @@ export function App() {
       {/* 1. PUBLIC SAAS LANDING PAGE */}
       {viewState === 'landing' && (
         <LandingPage
-          onNavigateToPortal={() => setViewState('portal')}
+          isAuthorized={authStatus === 'authorized' || demoMode}
+          authDeniedMessage={authDeniedMessage}
+          onDismissAuthDenied={() => setAuthDeniedMessage(null)}
+          onNavigateToPortal={() => {
+            // Only reachable when isAuthorized is true (LandingPage gates
+            // this itself), but double-checked here as well -- this is
+            // the function that was previously called unconditionally by
+            // "Launch App" with no auth check at all.
+            if (authStatus === 'authorized' || demoMode) setViewState('portal');
+          }}
+          onGoogleSignIn={handleGoogleSignIn}
+          onGoogleSignInForOnboarding={handleGoogleSignInForOnboarding}
           onLoginSuperAdminDemo={() => {
+            setDemoMode(true);
             setUserRole('SUPER_ADMIN');
             setViewState('super-admin');
           }}
           onLoginTenantAdminDemo={() => {
+            setDemoMode(true);
             setUserRole('TENANT_ADMIN');
             setCurrentOrgId('org-astracloud');
             setViewState('portal');
@@ -465,6 +585,8 @@ export function App() {
                 onOpenSuperAdminPanel={() => setViewState('super-admin')}
                 onSignOut={async () => {
                   await signOutUser();
+                  setDemoMode(false);
+                  setAuthStatus('unauthenticated');
                   setViewState('landing');
                 }}
                 currentUserEmail={currentUser?.email || undefined}
@@ -539,6 +661,15 @@ export function App() {
                   onSelectInvoice={(inv) => setSelectedInvoice(inv)}
                   onPayInvoice={handlePayInvoice}
                   onAddAuditLogEntry={handleAddAuditLogEntry}
+                />
+              )}
+
+              {activeTab === 'team' && (
+                <TeamManagement
+                  orgId={currentOrgId}
+                  currentUserEmail={currentUser?.email || undefined}
+                  currentUserRole={userRole}
+                  currentUserPermissions={null}
                 />
               )}
             </main>

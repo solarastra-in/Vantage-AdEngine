@@ -5,7 +5,7 @@
  */
 
 import { PlatformAdapter, PlatformPayload, ResolvedCredential } from '../campaignDispatchEngine';
-import { dryRunResult, callPlatformApi } from './dryRun';
+import { dryRunResult, dryRunPerformance, callPlatformApi } from './dryRun';
 
 const GRAPH_VERSION = 'v19.0';
 
@@ -45,5 +45,30 @@ export const metaAdapter: PlatformAdapter = {
     if (!credential) return;
     const url = `https://graph.facebook.com/${GRAPH_VERSION}/${externalId}?access_token=${encodeURIComponent(credential.secret)}`;
     await callPlatformApi(url, { method: 'DELETE' }, 'Meta Marketing API (rollback)');
+  },
+
+  async fetchPerformance(externalId, credential, dateRange) {
+    if (!credential) return dryRunPerformance('meta', externalId, dateRange);
+
+    const url =
+      `https://graph.facebook.com/${GRAPH_VERSION}/${externalId}/insights` +
+      `?fields=impressions,clicks,spend,actions` +
+      `&time_range=${encodeURIComponent(JSON.stringify({ since: dateRange.start, until: dateRange.end }))}` +
+      `&access_token=${encodeURIComponent(credential.secret)}`;
+
+    const body = await callPlatformApi(url, { method: 'GET' }, 'Meta Marketing API (insights)');
+    const row = body?.data?.[0] ?? {};
+    const conversions = (row.actions ?? []).find((a: any) => a.action_type === 'offsite_conversion')?.value ?? 0;
+
+    return {
+      externalId,
+      platform: 'meta',
+      impressions: Number(row.impressions ?? 0),
+      clicks: Number(row.clicks ?? 0),
+      conversions: Number(conversions),
+      spend: Number(row.spend ?? 0),
+      dateRange,
+      mode: 'LIVE',
+    };
   },
 };

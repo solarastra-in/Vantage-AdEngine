@@ -1,5 +1,6 @@
 import { 
   collection, 
+  collectionGroup,
   doc, 
   getDocs, 
   getDoc, 
@@ -114,6 +115,55 @@ export interface UserProfile {
   role: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER';
   orgId: string;
   createdAt: string;
+}
+
+export interface EmployeePermissions {
+  canCreateCampaigns: boolean;
+  canPublishCampaigns: boolean;
+  canEditCredentials: boolean;
+  canManageBilling: boolean;
+  canManageTeam: boolean;
+}
+
+export const ADMIN_DEFAULT_PERMISSIONS: EmployeePermissions = {
+  canCreateCampaigns: true,
+  canPublishCampaigns: true,
+  canEditCredentials: true,
+  canManageBilling: true,
+  canManageTeam: true,
+};
+
+export const MEMBER_DEFAULT_PERMISSIONS: EmployeePermissions = {
+  canCreateCampaigns: true,
+  canPublishCampaigns: false,
+  canEditCredentials: false,
+  canManageBilling: false,
+  canManageTeam: false,
+};
+
+/**
+ * An org-scoped allowlist entry authorizing a specific email address to
+ * sign in as an employee of that organization. This is the actual
+ * gatekeeping data for Google Auth -- a signed-in Google account is only
+ * granted portal access if its email has a matching entry (in ANY org,
+ * looked up via collectionGroup) with status ACCEPTED or PENDING.
+ * PENDING means "invited but hasn't signed in yet"; the first successful
+ * sign-in with that email flips it to ACCEPTED and creates the
+ * corresponding users/{uid} profile.
+ */
+export interface InvitedEmployee {
+  email: string;
+  role: 'TENANT_ADMIN' | 'TENANT_USER';
+  status: 'PENDING' | 'ACCEPTED';
+  invitedBy: string;
+  invitedAt: string;
+  acceptedAt?: string;
+  permissions?: EmployeePermissions;
+}
+
+/** Firestore document IDs can't contain '@' or '.', so emails are sanitized for use as IDs. */
+function emailToDocId(email: string): string {
+  return email.trim().toLowerCase().replace(/[.@]/g, '_');
 }
 
 // Initial Sample Organizations for Multi-Tenant Demonstration
@@ -436,5 +486,197 @@ export const saveChannelCredentialsToFirestore = async (orgId: string, creds: Ch
   } catch (error) {
     console.warn(`Error saving credentials for ${creds.platform}:`, error);
   }
+};
+
+// -----------------------------------------------------------------
+// 8. EMPLOYEE AUTHENTICATION & CUSTOMER ONBOARDING
+//
+// This is the actual gate a signed-in Google account has to clear before
+// reaching the portal. Previously, "Launch App" navigated directly into
+// the dashboard with no check at all, and "Continue with Google" signed a
+// user in and navigated to the portal regardless of whether that email
+// belonged to any customer of the platform. Both bypassed this entirely.
+// -----------------------------------------------------------------
+
+/**
+ * Looks up whether a signed-in user is already a known member of an
+ * organization (fast path for returning users -- one direct doc read by uid).
+ */
+export const fetchUserProfile = async (uid: string): Promise<UserProfile | null> => {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    return snap.exists() ? (snap.data() as UserProfile) : null;
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    return null;
+  }
+};
+
+/**
+ * Searches every organization's invitedEmployees subcollection for a
+ * PENDING or ACCEPTED entry matching this email, via a Firestore
+ * collectionGroup query (requires no server-side index beyond the default
+ * single-field index Firestore creates automatically for collectionGroup
+ * queries on a field). Returns null if no organization has authorized
+ * this email -- the caller must treat that as "not a customer," not as an
+ * error to route around.
+ */
+export const findEmployeeAuthorizationForEmail = async (
+  email: string
+): Promise<{ orgId: string; invite: InvitedEmployee } | null> => {
+  try {
+    const q = query(collectionGroup(db, 'invitedEmployees'), where('email', '==', email.trim().toLowerCase()));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+
+    // parent path shape: organizations/{orgId}/invitedEmployees/{docId}
+    const docSnap = snap.docs[0];
+    const orgId = docSnap.ref.parent.parent?.id;
+    if (!orgId) return null;
+
+    return { orgId, invite: docSnap.data() as InvitedEmployee };
+  } catch (error) {
+    console.error('Error looking up employee authorization:', error);
+    return null;
+  }
+};
+
+/**
+ * Called once, right after a Google sign-in succeeds, to determine whether
+ * this person is allowed into the portal and which organization they
+ * belong to. This is the single function that replaces the old
+ * "sign in -> navigate to portal unconditionally" behavior.
+ *
+ * Resolution order:
+ *  1. An existing users/{uid} profile (returning employee -- fast path).
+ *  2. A PENDING or ACCEPTED invitedEmployees entry for this email in any
+ *     org. First-time sign-in against a PENDING invite creates the user
+ *     profile and flips the invite to ACCEPTED.
+ *  3. Neither -- NOT_AUTHORIZED. The caller is responsible for signing the
+ *     user back out; this function only determines authorization, it
+ *     doesn't enforce it.
+ */
+export const resolveAuthorizedOrgForUser = async (
+  uid: string,
+  email: string,
+  displayName: string
+): Promise<{ status: 'AUTHORIZED'; profile: UserProfile } | { status: 'NOT_AUTHORIZED' }> => {
+  const existingProfile = await fetchUserProfile(uid);
+  if (existingProfile) {
+    return { status: 'AUTHORIZED', profile: existingProfile };
+  }
+
+  const authorization = await findEmployeeAuthorizationForEmail(email);
+  if (!authorization) {
+    return { status: 'NOT_AUTHORIZED' };
+  }
+
+  const { orgId, invite } = authorization;
+  const profile: UserProfile = {
+    uid,
+    email: email.trim().toLowerCase(),
+    displayName: displayName || email,
+    role: invite.role,
+    orgId,
+    createdAt: new Date().toISOString(),
+  };
+
+  await setDoc(doc(db, 'users', uid), profile);
+  await updateDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), {
+    status: 'ACCEPTED',
+    acceptedAt: new Date().toISOString(),
+  });
+
+  return { status: 'AUTHORIZED', profile };
+};
+
+/**
+ * Self-service customer onboarding: creates a brand-new organization and
+ * makes the signed-in user its first TENANT_ADMIN in one step. This is
+ * the actual "onboarding journey" -- distinct from SuperAdminPanel's
+ * createOrganizationInFirestore, which is an internal SaaS-operator tool
+ * for manually provisioning a tenant, not a self-service flow a customer
+ * would go through themselves.
+ */
+export const onboardNewOrganization = async (
+  orgName: string,
+  uid: string,
+  email: string,
+  displayName: string
+): Promise<UserProfile> => {
+  const orgId = `org-${orgName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'new'}-${Date.now().toString(36)}`;
+
+  const newOrg: Organization = {
+    id: orgId,
+    name: orgName.trim(),
+    domain: email.split('@')[1] ?? '',
+    plan: 'Starter',
+    monthlyAdBudget: 0,
+    assignedSeats: 1,
+    status: 'Active',
+    adminEmail: email,
+    createdAt: new Date().toISOString(),
+    channelsConfigured: 0,
+    activeCampaignsCount: 0,
+  };
+
+  await setDoc(doc(db, 'organizations', orgId), newOrg);
+  await seedFirestoreIfEmpty(orgId);
+
+  // The founder is auto-authorized as an ACCEPTED admin employee of their
+  // own new org -- no invite step needed for the person creating it.
+  await setDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), {
+    email: email.trim().toLowerCase(),
+    role: 'TENANT_ADMIN',
+    status: 'ACCEPTED',
+    invitedBy: email,
+    invitedAt: new Date().toISOString(),
+    acceptedAt: new Date().toISOString(),
+  } as InvitedEmployee);
+
+  const profile: UserProfile = {
+    uid,
+    email: email.trim().toLowerCase(),
+    displayName: displayName || email,
+    role: 'TENANT_ADMIN',
+    orgId,
+    createdAt: new Date().toISOString(),
+  };
+  await setDoc(doc(db, 'users', uid), profile);
+
+  return profile;
+};
+
+/** Invites a new employee by email into an existing org. They become ACCEPTED on their first sign-in with that email. */
+export const inviteEmployeeToOrg = async (
+  orgId: string,
+  email: string,
+  role: 'TENANT_ADMIN' | 'TENANT_USER',
+  invitedByEmail: string,
+  permissions?: EmployeePermissions
+): Promise<void> => {
+  const invite: InvitedEmployee = {
+    email: email.trim().toLowerCase(),
+    role,
+    status: 'PENDING',
+    invitedBy: invitedByEmail,
+    invitedAt: new Date().toISOString(),
+    ...(permissions ? { permissions } : {}),
+  };
+  await setDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), invite);
+};
+
+export const listInvitedEmployees = async (orgId: string): Promise<InvitedEmployee[]> => {
+  try {
+    const snap = await getDocs(collection(db, `organizations/${orgId}/invitedEmployees`));
+    return snap.docs.map(d => d.data() as InvitedEmployee);
+  } catch (error) {
+    console.error('Error listing invited employees:', error);
+    return [];
+  }
+};
+
+export const removeInvitedEmployee = async (orgId: string, email: string): Promise<void> => {
+  await deleteDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)));
 };
 

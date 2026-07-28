@@ -5,7 +5,7 @@
  */
 
 import { PlatformAdapter, PlatformPayload, ResolvedCredential } from '../campaignDispatchEngine';
-import { dryRunResult, callPlatformApi } from './dryRun';
+import { dryRunResult, dryRunPerformance, callPlatformApi } from './dryRun';
 
 export const pinterestAdapter: PlatformAdapter = {
   platform: 'pinterest',
@@ -48,5 +48,36 @@ export const pinterestAdapter: PlatformAdapter = {
       },
       'Pinterest Ads API (rollback)'
     );
+  },
+
+  async fetchPerformance(externalId, credential, dateRange) {
+    if (!credential) return dryRunPerformance('pinterest', externalId, dateRange);
+
+    const params = new URLSearchParams({
+      start_date: dateRange.start,
+      end_date: dateRange.end,
+      campaign_ids: externalId,
+      columns: 'IMPRESSION_2,CLICKTHROUGH_2,TOTAL_CONVERSIONS,SPEND_IN_DOLLAR',
+      granularity: 'TOTAL',
+    });
+
+    const body = await callPlatformApi(
+      `https://api.pinterest.com/v5/ad_accounts/${credential.accountId}/campaigns/analytics?${params.toString()}`,
+      { method: 'GET', headers: { Authorization: `Bearer ${credential.secret}` } },
+      'Pinterest Ads API (analytics)'
+    );
+
+    const row = Array.isArray(body) ? body[0] : body;
+
+    return {
+      externalId,
+      platform: 'pinterest',
+      impressions: Number(row?.IMPRESSION_2 ?? 0),
+      clicks: Number(row?.CLICKTHROUGH_2 ?? 0),
+      conversions: Number(row?.TOTAL_CONVERSIONS ?? 0),
+      spend: Number(row?.SPEND_IN_DOLLAR ?? 0),
+      dateRange,
+      mode: 'LIVE',
+    };
   },
 };
