@@ -37,7 +37,13 @@ export const SaaSHeader: React.FC<SaaSHeaderProps> = ({
   onSignOut,
   currentUserEmail,
 }) => {
-  const currentOrg = organizations.find(o => o.id === currentOrgId) || organizations[0];
+  const visibleOrganizations = userRole === 'SUPER_ADMIN' 
+    ? organizations 
+    : organizations.filter(o => o.id === currentOrgId);
+  
+  const currentOrg = visibleOrganizations.find(o => o.id === currentOrgId) || visibleOrganizations[0] || organizations.find(o => o.id === currentOrgId);
+
+  const isPendingApproval = currentOrg?.status === 'Pending Approval' && userRole !== 'SUPER_ADMIN';
 
   return (
     <header className="h-20 border-b border-stone-800 flex items-center justify-between px-4 sm:px-8 bg-[#0a0a0a] text-stone-200 sticky top-0 z-40 backdrop-blur-md bg-opacity-95">
@@ -49,18 +55,18 @@ export const SaaSHeader: React.FC<SaaSHeaderProps> = ({
             <div className="text-left">
               <span className="block text-[10px] text-stone-500 font-mono uppercase leading-tight">Workspace Tenant</span>
               <span className="block text-xs font-bold text-white font-sans max-w-[150px] sm:max-w-[200px] truncate">
-                {currentOrg?.name || 'Astra Cloud Systems'}
+                {currentOrg?.name || 'Customer Workspace'}
               </span>
             </div>
-            <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
+            {userRole === 'SUPER_ADMIN' && <ChevronDown className="w-3.5 h-3.5 text-stone-400" />}
           </div>
 
           {/* Tenant Switcher Dropdown */}
           <div className="absolute left-0 top-full mt-1 w-64 bg-stone-900 border border-stone-800 rounded shadow-2xl py-2 hidden group-hover:block z-50">
             <div className="px-3 py-1 text-[10px] uppercase font-mono text-stone-500 font-semibold border-b border-stone-800 mb-1">
-              Switch Customer Tenant
+              {userRole === 'SUPER_ADMIN' ? 'Switch Customer Tenant' : 'Your Active Workspace'}
             </div>
-            {organizations.map(org => (
+            {visibleOrganizations.map(org => (
               <button
                 key={org.id}
                 onClick={() => onSelectOrganization(org.id)}
@@ -92,9 +98,9 @@ export const SaaSHeader: React.FC<SaaSHeaderProps> = ({
 
         {/* Role Badge */}
         <span className={`hidden xl:inline-block text-[10px] font-mono px-2 py-1 rounded border ${
-          userRole === 'SUPER_ADMIN' ? 'bg-amber-400/10 text-amber-400 border-amber-400/30' : 'bg-stone-900 text-stone-400 border-stone-800'
+          userRole === 'SUPER_ADMIN' ? 'bg-amber-400/10 text-amber-400 border-amber-400/30' : isPendingApproval ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 font-bold' : 'bg-stone-900 text-stone-400 border-stone-800'
         }`}>
-          {userRole === 'SUPER_ADMIN' ? '[SaaS Owner]' : `[Tenant Admin: ${currentOrg?.plan}]`}
+          {userRole === 'SUPER_ADMIN' ? '[SaaS Owner]' : isPendingApproval ? '[Awaiting Admin Approval]' : `[Tenant Admin: ${currentOrg?.plan}]`}
         </span>
       </div>
 
@@ -103,29 +109,31 @@ export const SaaSHeader: React.FC<SaaSHeaderProps> = ({
         <div className="flex flex-col shrink-0">
           <span className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Total Reach</span>
           <span className="text-xl font-serif text-white tracking-tight italic">
-            {totalReach.toLocaleString()}
+            {isPendingApproval ? '0' : totalReach.toLocaleString()}
           </span>
         </div>
 
         <div className="flex flex-col shrink-0">
           <span className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Ad Spend</span>
           <span className="text-xl font-serif text-white tracking-tight italic">
-            ${totalSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${isPendingApproval ? '0.00' : totalSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
 
         <div className="flex flex-col shrink-0">
           <span className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Avg ROI</span>
           <span className="text-xl font-serif text-amber-400 tracking-tight italic">
-            {avgRoi.toFixed(2)}x
+            {isPendingApproval ? '0.00x' : `${avgRoi.toFixed(2)}x`}
           </span>
         </div>
 
         <div className="flex flex-col shrink-0">
           <span className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">API Sync Status</span>
           <div className="flex items-center space-x-1.5 mt-0.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />
-            <span className="text-xs font-mono text-stone-300">{activeNodesCount} Platform Nodes</span>
+            <span className={`w-2 h-2 rounded-full ${isPendingApproval ? 'bg-amber-400 animate-ping' : 'bg-emerald-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse'}`} />
+            <span className="text-xs font-mono text-stone-300">
+              {isPendingApproval ? 'Pending Approval' : `${activeNodesCount} Platform Nodes`}
+            </span>
           </div>
         </div>
       </div>
@@ -143,7 +151,7 @@ export const SaaSHeader: React.FC<SaaSHeaderProps> = ({
           </button>
         )}
 
-        {onRefreshData && (
+        {onRefreshData && !isPendingApproval && (
           <button
             onClick={onRefreshData}
             disabled={isRefreshing}
@@ -154,13 +162,20 @@ export const SaaSHeader: React.FC<SaaSHeaderProps> = ({
           </button>
         )}
 
-        <button
-          onClick={onOpenWizard}
-          className="bg-amber-400 text-black px-4 sm:px-5 py-2.5 text-xs font-extrabold uppercase tracking-widest cursor-pointer hover:bg-amber-300 transition-colors flex items-center gap-2 shadow-lg shadow-amber-400/10 rounded-sm"
-        >
-          <Plus className="w-4 h-4 stroke-[3]" />
-          <span>Deploy Campaign</span>
-        </button>
+        {isPendingApproval ? (
+          <div className="bg-amber-400/10 border border-amber-400/40 text-amber-400 px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider rounded flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4" />
+            <span>Locked &bull; Approval Needed</span>
+          </div>
+        ) : (
+          <button
+            onClick={onOpenWizard}
+            className="bg-amber-400 text-black px-4 sm:px-5 py-2.5 text-xs font-extrabold uppercase tracking-widest cursor-pointer hover:bg-amber-300 transition-colors flex items-center gap-2 shadow-lg shadow-amber-400/10 rounded-sm"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>Deploy Campaign</span>
+          </button>
+        )}
 
         {onSignOut && (
           <button

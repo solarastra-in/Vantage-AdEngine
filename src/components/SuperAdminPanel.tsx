@@ -17,7 +17,7 @@ import {
   ArrowUpRight,
   UserCheck
 } from 'lucide-react';
-import { Organization, ContactLead, createOrganizationInFirestore, fetchLeadsFromFirestore } from '../lib/firestoreService';
+import { Organization, ContactLead, createOrganizationInFirestore, fetchLeadsFromFirestore, updateOrganizationStatusInFirestore } from '../lib/firestoreService';
 
 interface SuperAdminPanelProps {
   organizations: Organization[];
@@ -58,6 +58,15 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       console.error('Error fetching leads:', err);
     } finally {
       setIsLoadingLeads(false);
+    }
+  };
+
+  const handleApproveTenant = async (orgId: string) => {
+    try {
+      await updateOrganizationStatusInFirestore(orgId, 'Active');
+      onRefreshOrganizations();
+    } catch (err) {
+      console.error('Failed to approve tenant:', err);
     }
   };
 
@@ -266,19 +275,42 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     {org.adminEmail}
                   </td>
                   <td className="p-3">
-                    <span className="flex items-center gap-1.5 text-emerald-400">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span>{org.status}</span>
-                    </span>
+                    {org.status === 'Active' ? (
+                      <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Active</span>
+                      </span>
+                    ) : org.status === 'Pending Approval' ? (
+                      <span className="flex items-center gap-1.5 text-amber-400 font-bold px-2 py-0.5 rounded bg-amber-400/10 border border-amber-400/30 w-fit">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        <span>Pending Approval</span>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-rose-400 font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        <span>{org.status}</span>
+                      </span>
+                    )}
                   </td>
                   <td className="p-3 text-right">
-                    <button
-                      onClick={() => onSelectOrganization(org.id)}
-                      className="px-3 py-1.5 bg-amber-400/10 border border-amber-400/40 text-amber-400 hover:bg-amber-400 hover:text-black transition-all rounded font-bold cursor-pointer text-[11px] inline-flex items-center gap-1"
-                    >
-                      <span>Open Workspace</span>
-                      <ArrowUpRight className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      {org.status === 'Pending Approval' && (
+                        <button
+                          onClick={() => handleApproveTenant(org.id)}
+                          className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500 hover:text-black transition-all rounded font-bold cursor-pointer text-[11px] inline-flex items-center gap-1"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Approve Workspace</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onSelectOrganization(org.id)}
+                        className="px-3 py-1.5 bg-amber-400/10 border border-amber-400/40 text-amber-400 hover:bg-amber-400 hover:text-black transition-all rounded font-bold cursor-pointer text-[11px] inline-flex items-center gap-1"
+                      >
+                        <span>Open Workspace</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -10,6 +10,7 @@ import { AiAdStudio } from './components/AiAdStudio';
 import { ApiNexus } from './components/ApiNexus';
 import { FinancialLedger } from './components/FinancialLedger';
 import { TeamManagement } from './components/TeamManagement';
+import { PendingApprovalView } from './components/PendingApprovalView';
 import { CampaignWizardModal } from './components/CampaignWizardModal';
 import { InvoiceModal } from './components/InvoiceModal';
 import { CampaignDetailModal } from './components/CampaignDetailModal';
@@ -220,6 +221,10 @@ export function App() {
 
   // Handle Organization Selection / Switch Workspace
   const handleSelectOrganization = (orgId: string) => {
+    if (userRole !== 'SUPER_ADMIN' && orgId !== currentOrgId) {
+      console.warn('Unauthorized tenant workspace switch prevented');
+      return;
+    }
     setCurrentOrgId(orgId);
     setViewState('portal');
   };
@@ -571,7 +576,7 @@ export function App() {
                 totalSpend={totalSpend}
                 avgRoi={3.84}
                 activeNodesCount={activeNodesCount}
-                organizations={organizations}
+                organizations={userRole === 'SUPER_ADMIN' ? organizations : organizations.filter(o => o.id === currentOrgId)}
                 currentOrgId={currentOrgId}
                 userRole={userRole}
                 onSelectOrganization={handleSelectOrganization}
@@ -595,83 +600,101 @@ export function App() {
 
             {/* Active Tab View */}
             <main className="flex-1">
-              {activeTab === 'dashboard' && (
-                <CommandCenter
-                  campaigns={campaigns}
-                  channels={channels}
-                  invoices={invoices}
-                  timeSeries={timeSeries}
-                  onOpenWizard={() => {
-                    setAiWizardInitialData(null);
-                    setIsWizardOpen(true);
-                  }}
-                  onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
-                  onSelectCampaign={(c) => setSelectedCampaign(c)}
-                />
-              )}
+              {(() => {
+                const currentOrg = organizations.find(o => o.id === currentOrgId) || organizations[0];
+                const isPendingApproval = currentOrg?.status === 'Pending Approval' && userRole !== 'SUPER_ADMIN';
 
-              {activeTab === 'campaigns' && (
-                <CampaignManager
-                  campaigns={campaigns}
-                  onOpenWizard={() => {
-                    setAiWizardInitialData(null);
-                    setIsWizardOpen(true);
-                  }}
-                  onSelectCampaign={(c) => setSelectedCampaign(c)}
-                  onToggleStatus={handleToggleCampaignStatus}
-                  onPublishCampaign={handlePublishCampaign}
-                  onBulkPause={handleBulkPause}
-                  onBulkResume={handleBulkResume}
-                  onBulkDuplicate={handleBulkDuplicate}
-                />
-              )}
+                if (isPendingApproval) {
+                  return (
+                    <PendingApprovalView 
+                      organization={currentOrg} 
+                      currentUserEmail={currentUser?.email || undefined} 
+                    />
+                  );
+                }
 
-              {activeTab === 'analytics' && (
-                <CommandCenter
-                  campaigns={campaigns}
-                  channels={channels}
-                  invoices={invoices}
-                  timeSeries={timeSeries}
-                  onOpenWizard={() => {
-                    setAiWizardInitialData(null);
-                    setIsWizardOpen(true);
-                  }}
-                  onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
-                  onSelectCampaign={(c) => setSelectedCampaign(c)}
-                />
-              )}
+                return (
+                  <>
+                    {activeTab === 'dashboard' && (
+                      <CommandCenter
+                        campaigns={campaigns}
+                        channels={channels}
+                        invoices={invoices}
+                        timeSeries={timeSeries}
+                        onOpenWizard={() => {
+                          setAiWizardInitialData(null);
+                          setIsWizardOpen(true);
+                        }}
+                        onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
+                        onSelectCampaign={(c) => setSelectedCampaign(c)}
+                      />
+                    )}
 
-              {activeTab === 'ai-studio' && (
-                <AiAdStudio
-                  onOpenWizardWithAiData={handleOpenWizardWithAiData}
-                />
-              )}
+                    {activeTab === 'campaigns' && (
+                      <CampaignManager
+                        campaigns={campaigns}
+                        onOpenWizard={() => {
+                          setAiWizardInitialData(null);
+                          setIsWizardOpen(true);
+                        }}
+                        onSelectCampaign={(c) => setSelectedCampaign(c)}
+                        onToggleStatus={handleToggleCampaignStatus}
+                        onPublishCampaign={handlePublishCampaign}
+                        onBulkPause={handleBulkPause}
+                        onBulkResume={handleBulkResume}
+                        onBulkDuplicate={handleBulkDuplicate}
+                      />
+                    )}
 
-              {activeTab === 'api-nexus' && (
-                <ApiNexus
-                  channels={channels}
-                  onTestChannel={handleTestChannel}
-                  orgId={currentOrgId}
-                />
-              )}
+                    {activeTab === 'analytics' && (
+                      <CommandCenter
+                        campaigns={campaigns}
+                        channels={channels}
+                        invoices={invoices}
+                        timeSeries={timeSeries}
+                        onOpenWizard={() => {
+                          setAiWizardInitialData(null);
+                          setIsWizardOpen(true);
+                        }}
+                        onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
+                        onSelectCampaign={(c) => setSelectedCampaign(c)}
+                      />
+                    )}
 
-              {activeTab === 'financials' && (
-                <FinancialLedger
-                  invoices={invoices}
-                  onSelectInvoice={(inv) => setSelectedInvoice(inv)}
-                  onPayInvoice={handlePayInvoice}
-                  onAddAuditLogEntry={handleAddAuditLogEntry}
-                />
-              )}
+                    {activeTab === 'ai-studio' && (
+                      <AiAdStudio
+                        onOpenWizardWithAiData={handleOpenWizardWithAiData}
+                      />
+                    )}
 
-              {activeTab === 'team' && (
-                <TeamManagement
-                  orgId={currentOrgId}
-                  currentUserEmail={currentUser?.email || undefined}
-                  currentUserRole={userRole}
-                  currentUserPermissions={null}
-                />
-              )}
+                    {activeTab === 'api-nexus' && (
+                      <ApiNexus
+                        channels={channels}
+                        onTestChannel={handleTestChannel}
+                        orgId={currentOrgId}
+                      />
+                    )}
+
+                    {activeTab === 'financials' && (
+                      <FinancialLedger
+                        invoices={invoices}
+                        onSelectInvoice={(inv) => setSelectedInvoice(inv)}
+                        onPayInvoice={handlePayInvoice}
+                        onAddAuditLogEntry={handleAddAuditLogEntry}
+                      />
+                    )}
+
+                    {activeTab === 'team' && (
+                      <TeamManagement
+                        orgId={currentOrgId}
+                        currentUserEmail={currentUser?.email || undefined}
+                        currentUserRole={userRole}
+                        currentUserPermissions={null}
+                      />
+                    )}
+                  </>
+                );
+              })()}
             </main>
           </div>
         </div>

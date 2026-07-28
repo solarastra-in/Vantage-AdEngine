@@ -90,7 +90,7 @@ export interface Organization {
   plan: 'Starter' | 'Growth' | 'Enterprise';
   monthlyAdBudget: number;
   assignedSeats: number;
-  status: 'Active' | 'Suspended' | 'Pending';
+  status: 'Active' | 'Suspended' | 'Pending Approval' | 'Pending';
   adminEmail: string;
   createdAt: string;
   channelsConfigured: number;
@@ -153,7 +153,7 @@ export const MEMBER_DEFAULT_PERMISSIONS: EmployeePermissions = {
  */
 export interface InvitedEmployee {
   email: string;
-  role: 'TENANT_ADMIN' | 'TENANT_USER';
+  role: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER';
   status: 'PENDING' | 'ACCEPTED';
   invitedBy: string;
   invitedAt: string;
@@ -166,6 +166,11 @@ function emailToDocId(email: string): string {
   return email.trim().toLowerCase().replace(/[.@]/g, '_');
 }
 
+// Super Admin Email Whitelist
+export const SUPER_ADMIN_EMAILS = ['solarastra.in@gmail.com'];
+export const isSuperAdminEmail = (email: string): boolean => 
+  SUPER_ADMIN_EMAILS.includes(email.trim().toLowerCase());
+
 // Initial Sample Organizations for Multi-Tenant Demonstration
 export const INITIAL_ORGANIZATIONS: Organization[] = [
   {
@@ -176,7 +181,7 @@ export const INITIAL_ORGANIZATIONS: Organization[] = [
     monthlyAdBudget: 250000,
     assignedSeats: 25,
     status: 'Active',
-    adminEmail: 'billing@astracloud.io',
+    adminEmail: 'solarastra.in@gmail.com',
     createdAt: '2026-01-10T09:00:00Z',
     channelsConfigured: 6,
     activeCampaignsCount: 2,
@@ -227,36 +232,36 @@ export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => 
       }
     }
 
-    // Seed campaigns for the specified tenant if empty
-    const campaignsRef = collection(db, `organizations/${orgId}/campaigns`);
-    const cmpSnap = await getDocs(campaignsRef);
+    // ONLY seed sample campaigns/channels/invoices for the primary demo org (org-astracloud)
+    if (orgId === 'org-astracloud') {
+      const campaignsRef = collection(db, `organizations/${orgId}/campaigns`);
+      const cmpSnap = await getDocs(campaignsRef);
 
-    if (cmpSnap.empty) {
-      console.log(`Seeding initial campaigns for tenant ${orgId} to Firestore...`);
-      for (const campaign of INITIAL_CAMPAIGNS) {
-        await setDoc(doc(db, `organizations/${orgId}/campaigns`, campaign.id), campaign);
+      if (cmpSnap.empty) {
+        console.log(`Seeding initial campaigns for tenant ${orgId} to Firestore...`);
+        for (const campaign of INITIAL_CAMPAIGNS) {
+          await setDoc(doc(db, `organizations/${orgId}/campaigns`, campaign.id), campaign);
+        }
       }
-    }
 
-    // Seed channels for tenant if empty
-    const channelsRef = collection(db, `organizations/${orgId}/channels`);
-    const chSnap = await getDocs(channelsRef);
+      const channelsRef = collection(db, `organizations/${orgId}/channels`);
+      const chSnap = await getDocs(channelsRef);
 
-    if (chSnap.empty) {
-      console.log(`Seeding initial channels for tenant ${orgId} to Firestore...`);
-      for (const channel of INITIAL_CHANNELS) {
-        await setDoc(doc(db, `organizations/${orgId}/channels`, channel.platform), channel);
+      if (chSnap.empty) {
+        console.log(`Seeding initial channels for tenant ${orgId} to Firestore...`);
+        for (const channel of INITIAL_CHANNELS) {
+          await setDoc(doc(db, `organizations/${orgId}/channels`, channel.platform), channel);
+        }
       }
-    }
 
-    // Seed invoices for tenant if empty
-    const invoicesRef = collection(db, `organizations/${orgId}/invoices`);
-    const invSnap = await getDocs(invoicesRef);
+      const invoicesRef = collection(db, `organizations/${orgId}/invoices`);
+      const invSnap = await getDocs(invoicesRef);
 
-    if (invSnap.empty) {
-      console.log(`Seeding initial invoices for tenant ${orgId} to Firestore...`);
-      for (const invoice of INITIAL_INVOICES) {
-        await setDoc(doc(db, `organizations/${orgId}/invoices`, invoice.id), invoice);
+      if (invSnap.empty) {
+        console.log(`Seeding initial invoices for tenant ${orgId} to Firestore...`);
+        for (const invoice of INITIAL_INVOICES) {
+          await setDoc(doc(db, `organizations/${orgId}/invoices`, invoice.id), invoice);
+        }
       }
     }
   } catch (error) {
@@ -289,10 +294,23 @@ export const fetchOrganizationsFromFirestore = async (): Promise<Organization[]>
 export const createOrganizationInFirestore = async (newOrg: Organization) => {
   try {
     await setDoc(doc(db, 'organizations', newOrg.id), newOrg);
-    // Seed default channels and initial sample campaign for new tenant
-    await seedFirestoreIfEmpty(newOrg.id);
+    if (newOrg.id === 'org-astracloud') {
+      await seedFirestoreIfEmpty(newOrg.id);
+    }
   } catch (error) {
     console.error('Error creating organization in Firestore:', error);
+    throw error;
+  }
+};
+
+export const updateOrganizationStatusInFirestore = async (
+  orgId: string,
+  status: 'Active' | 'Pending Approval' | 'Suspended'
+) => {
+  try {
+    await updateDoc(doc(db, 'organizations', orgId), { status });
+  } catch (error) {
+    console.error(`Error updating status for org ${orgId}:`, error);
     throw error;
   }
 };
@@ -304,8 +322,11 @@ export const fetchCampaignsFromFirestore = async (orgId: string): Promise<Campai
     const snap = await getDocs(ref);
 
     if (snap.empty) {
-      await seedFirestoreIfEmpty(orgId);
-      return INITIAL_CAMPAIGNS;
+      if (orgId === 'org-astracloud') {
+        await seedFirestoreIfEmpty(orgId);
+        return INITIAL_CAMPAIGNS;
+      }
+      return [];
     }
 
     const campaigns: Campaign[] = [];
@@ -314,8 +335,8 @@ export const fetchCampaignsFromFirestore = async (orgId: string): Promise<Campai
     });
     return campaigns;
   } catch (error) {
-    console.warn(`Fallback to local campaigns for tenant ${orgId}:`, error);
-    return INITIAL_CAMPAIGNS;
+    console.warn(`Fallback for campaigns for tenant ${orgId}:`, error);
+    return orgId === 'org-astracloud' ? INITIAL_CAMPAIGNS : [];
   }
 };
 
@@ -348,8 +369,11 @@ export const fetchInvoicesFromFirestore = async (orgId: string): Promise<Invoice
     const snap = await getDocs(ref);
 
     if (snap.empty) {
-      await seedFirestoreIfEmpty(orgId);
-      return INITIAL_INVOICES;
+      if (orgId === 'org-astracloud') {
+        await seedFirestoreIfEmpty(orgId);
+        return INITIAL_INVOICES;
+      }
+      return [];
     }
 
     const invoices: Invoice[] = [];
@@ -358,8 +382,8 @@ export const fetchInvoicesFromFirestore = async (orgId: string): Promise<Invoice
     });
     return invoices;
   } catch (error) {
-    console.warn(`Fallback to local invoices for tenant ${orgId}:`, error);
-    return INITIAL_INVOICES;
+    console.warn(`Fallback for invoices for tenant ${orgId}:`, error);
+    return orgId === 'org-astracloud' ? INITIAL_INVOICES : [];
   }
 };
 
@@ -397,8 +421,20 @@ export const fetchChannelsFromFirestore = async (orgId: string): Promise<Channel
     const snap = await getDocs(ref);
 
     if (snap.empty) {
-      await seedFirestoreIfEmpty(orgId);
-      return INITIAL_CHANNELS;
+      if (orgId === 'org-astracloud') {
+        await seedFirestoreIfEmpty(orgId);
+        return INITIAL_CHANNELS;
+      }
+      // Clean default channels for new tenant
+      const defaultChannels: ChannelApiStatus[] = INITIAL_CHANNELS.map(ch => ({
+        ...ch,
+        status: 'DISCONNECTED',
+        connectedAccountsCount: 0,
+        activeCampaignsCount: 0,
+        spendThisMonth: 0,
+        latencyMs: 0,
+      }));
+      return defaultChannels;
     }
 
     const channels: ChannelApiStatus[] = [];
@@ -408,7 +444,7 @@ export const fetchChannelsFromFirestore = async (orgId: string): Promise<Channel
     return channels;
   } catch (error) {
     console.warn(`Fallback to local channels:`, error);
-    return INITIAL_CHANNELS;
+    return orgId === 'org-astracloud' ? INITIAL_CHANNELS : [];
   }
 };
 
@@ -524,43 +560,88 @@ export const fetchUserProfile = async (uid: string): Promise<UserProfile | null>
 export const findEmployeeAuthorizationForEmail = async (
   email: string
 ): Promise<{ orgId: string; invite: InvitedEmployee } | null> => {
-  try {
-    const q = query(collectionGroup(db, 'invitedEmployees'), where('email', '==', email.trim().toLowerCase()));
-    const snap = await getDocs(q);
-    if (snap.empty) return null;
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return null;
 
-    // parent path shape: organizations/{orgId}/invitedEmployees/{docId}
-    const docSnap = snap.docs[0];
-    const orgId = docSnap.ref.parent.parent?.id;
-    if (!orgId) return null;
-
-    return { orgId, invite: docSnap.data() as InvitedEmployee };
-  } catch (error) {
-    console.error('Error looking up employee authorization:', error);
-    return null;
+  // Platform Super Admin fast path
+  if (isSuperAdminEmail(cleanEmail)) {
+    return {
+      orgId: 'org-astracloud',
+      invite: {
+        email: cleanEmail,
+        role: 'SUPER_ADMIN',
+        status: 'ACCEPTED',
+        invitedBy: 'Platform System',
+        invitedAt: new Date().toISOString(),
+        acceptedAt: new Date().toISOString(),
+      }
+    };
   }
+
+  try {
+    const q = query(collectionGroup(db, 'invitedEmployees'), where('email', '==', cleanEmail));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const docSnap = snap.docs[0];
+      const orgId = docSnap.ref.parent.parent?.id;
+      if (orgId) {
+        return { orgId, invite: docSnap.data() as InvitedEmployee };
+      }
+    }
+  } catch (error) {
+    console.warn('CollectionGroup query for invitedEmployees failed:', error);
+  }
+
+  // Fallback check: check if this email matches adminEmail for an organization
+  try {
+    const orgsRef = collection(db, 'organizations');
+    const orgsSnap = await getDocs(query(orgsRef, where('adminEmail', '==', cleanEmail)));
+    if (!orgsSnap.empty) {
+      const matchedOrg = orgsSnap.docs[0];
+      return {
+        orgId: matchedOrg.id,
+        invite: {
+          email: cleanEmail,
+          role: 'TENANT_ADMIN',
+          status: 'ACCEPTED',
+          invitedBy: cleanEmail,
+          invitedAt: new Date().toISOString(),
+          acceptedAt: new Date().toISOString(),
+        }
+      };
+    }
+  } catch (error) {
+    console.warn('Organizations fallback lookup by adminEmail failed:', error);
+  }
+
+  return null;
 };
 
 /**
  * Called once, right after a Google sign-in succeeds, to determine whether
  * this person is allowed into the portal and which organization they
- * belong to. This is the single function that replaces the old
- * "sign in -> navigate to portal unconditionally" behavior.
- *
- * Resolution order:
- *  1. An existing users/{uid} profile (returning employee -- fast path).
- *  2. A PENDING or ACCEPTED invitedEmployees entry for this email in any
- *     org. First-time sign-in against a PENDING invite creates the user
- *     profile and flips the invite to ACCEPTED.
- *  3. Neither -- NOT_AUTHORIZED. The caller is responsible for signing the
- *     user back out; this function only determines authorization, it
- *     doesn't enforce it.
+ * belong to.
  */
 export const resolveAuthorizedOrgForUser = async (
   uid: string,
   email: string,
   displayName: string
 ): Promise<{ status: 'AUTHORIZED'; profile: UserProfile } | { status: 'NOT_AUTHORIZED' }> => {
+  const cleanEmail = email.trim().toLowerCase();
+
+  if (isSuperAdminEmail(cleanEmail)) {
+    const profile: UserProfile = {
+      uid,
+      email: cleanEmail,
+      displayName: displayName || cleanEmail,
+      role: 'SUPER_ADMIN',
+      orgId: 'org-astracloud',
+      createdAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, 'users', uid), profile, { merge: true });
+    return { status: 'AUTHORIZED', profile };
+  }
+
   const existingProfile = await fetchUserProfile(uid);
   if (existingProfile) {
     return { status: 'AUTHORIZED', profile: existingProfile };
@@ -574,7 +655,7 @@ export const resolveAuthorizedOrgForUser = async (
   const { orgId, invite } = authorization;
   const profile: UserProfile = {
     uid,
-    email: email.trim().toLowerCase(),
+    email: cleanEmail,
     displayName: displayName || email,
     role: invite.role,
     orgId,
@@ -582,10 +663,14 @@ export const resolveAuthorizedOrgForUser = async (
   };
 
   await setDoc(doc(db, 'users', uid), profile);
-  await updateDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), {
-    status: 'ACCEPTED',
-    acceptedAt: new Date().toISOString(),
-  });
+  try {
+    await updateDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), {
+      status: 'ACCEPTED',
+      acceptedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('Could not update invitedEmployees status:', err);
+  }
 
   return { status: 'AUTHORIZED', profile };
 };
@@ -613,7 +698,7 @@ export const onboardNewOrganization = async (
     plan: 'Starter',
     monthlyAdBudget: 0,
     assignedSeats: 1,
-    status: 'Active',
+    status: 'Pending Approval',
     adminEmail: email,
     createdAt: new Date().toISOString(),
     channelsConfigured: 0,

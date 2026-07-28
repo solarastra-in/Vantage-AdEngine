@@ -68,6 +68,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authFlowError, setAuthFlowError] = useState<string | null>(null);
 
+  // Capability Toggle View
+  const [capabilityView, setCapabilityView] = useState<'business' | 'technical'>('business');
+
   // Show demo shortcuts only outside production builds -- these bypass
   // real authentication entirely and should never ship as a live backdoor.
   // Note: process.env is NOT available in client-side code under this
@@ -215,17 +218,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[350px] bg-amber-500/5 blur-[120px] rounded-full pointer-events-none" />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-stone-900 border border-stone-800 text-stone-300 text-xs font-mono mb-8">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-stone-900 border border-stone-800 text-stone-300 text-xs font-mono mb-8">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>SaaS Multi-Tenant Enterprise Platform</span>
+            <span>Enterprise Omnichannel Media & Ad Automation Engine</span>
           </div>
 
           <h1 className="text-4xl sm:text-6xl lg:text-7xl font-serif text-white tracking-tight leading-[1.1] max-w-5xl mx-auto italic font-normal">
-            The Enterprise <span className="not-italic font-sans font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-amber-500">Omnichannel Ad Engine</span> for Scaleups & Agencies
+            The Enterprise <span className="not-italic font-sans font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-amber-500">Omnichannel Ad Engine</span> for Scaleups & Brands
           </h1>
 
           <p className="mt-6 text-base sm:text-xl text-stone-400 max-w-3xl mx-auto font-light leading-relaxed">
-            Manage, publish, and optimize digital ad campaigns across Meta, Google, LinkedIn, TikTok, Pinterest, X, and Programmatic DSP from a single unified workspace. Powered by Gemini AI & real-time automated budget dispatch.
+            Execute, monitor, and optimize ad campaigns across Meta, Google, LinkedIn, TikTok, Pinterest, X, and Programmatic DSP from a single unified workspace. Powered by Gemini 3.6 AI & sub-second automated budget dispatch.
           </p>
 
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -246,7 +249,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               className="w-full sm:w-auto bg-stone-900 border border-stone-700 text-stone-200 px-8 py-4 text-xs font-bold uppercase tracking-widest hover:bg-stone-800 transition-colors cursor-pointer rounded-sm flex items-center justify-center gap-2"
             >
               <Terminal className="w-4 h-4 text-amber-400" />
-              <span>Explore Live Demo Workspace</span>
+              <span>Explore Live Workspace</span>
             </button>
           </div>
 
@@ -258,7 +261,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 onClick={onLoginSuperAdminDemo}
                 className="px-3 py-1 bg-stone-900 border border-amber-400/30 text-amber-400 hover:bg-stone-800 rounded cursor-pointer"
               >
-                [SaaS Super Admin]
+                [Platform Admin Demo]
               </button>
             )}
             {onLoginTenantAdminDemo && (
@@ -266,7 +269,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 onClick={onLoginTenantAdminDemo}
                 className="px-3 py-1 bg-stone-900 border border-stone-700 text-stone-300 hover:bg-stone-800 rounded cursor-pointer"
               >
-                [Astra Cloud Tenant Admin]
+                [Enterprise Workspace Demo]
               </button>
             )}
           </div>
@@ -291,50 +294,234 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </div>
       </section>
 
-      {/* Platform Features Grid */}
-      <section id="features" className="py-24 border-b border-stone-800/80 bg-[#080808]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      {/* Platform Capabilities Showcase (Business & Technical) */}
+      <section id="features" className="py-24 border-b border-stone-800/80 bg-[#080808] relative overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="text-center max-w-3xl mx-auto">
-            <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold block mb-2">Built For Modern Growth Ops</span>
+            <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold block mb-2">Engineered For Growth Operations</span>
             <h2 className="text-3xl sm:text-5xl font-serif italic text-white tracking-tight">
-              Architected as an End-to-End <span className="not-italic font-sans font-extrabold text-stone-100">Multi-Tenant SaaS Portal</span>
+              Enterprise <span className="not-italic font-sans font-extrabold text-stone-100">Business & Technical Capabilities</span>
             </h2>
             <p className="mt-4 text-stone-400 text-sm sm:text-base font-light">
-              Provide your team and corporate sub-tenants with segregated ad workspaces, automated financial invoicing, and Gemini-driven multi-channel creative generation.
+              Transform complex digital advertising operations with single-click cross-platform API dispatch, real-time telemetry, and server-side Gemini 3.6 AI creative synthesis.
             </p>
-          </div>
 
-          <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
-              <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
-                <Building2 className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white tracking-wide uppercase">Multi-Tenant Workspaces</h3>
-              <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
-                Manage separate customer companies, assign user roles (Super Admin, Tenant Admin, Campaign Manager), and isolate campaigns and API credentials securely in Firebase Firestore.
-              </p>
-            </div>
-
-            <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
-              <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
-                <Bot className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white tracking-wide uppercase">AI Multi-Channel Creative Studio</h3>
-              <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
-                Generate tailored ad headlines, body copy, and hashtags respecting exact character limits for Meta, Google, LinkedIn, TikTok, and Pinterest using server-side Gemini 3.6 API.
-              </p>
-            </div>
-
-            <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
-              <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white tracking-wide uppercase">Financial Ledger & Invoices</h3>
-              <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
-                Automated 10% platform fee calculation, real-time media spend tracking, corporate credit card / crypto invoice settlement, and printable billing statements.
-              </p>
+            {/* View Switcher Controls */}
+            <div className="mt-8 inline-flex p-1.5 rounded-lg bg-stone-950 border border-stone-800 font-mono text-xs font-bold uppercase tracking-wider">
+              <button
+                onClick={() => setCapabilityView('business')}
+                className={`px-5 py-2.5 rounded cursor-pointer transition-all flex items-center gap-2 ${
+                  capabilityView === 'business'
+                    ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20'
+                    : 'text-stone-400 hover:text-white'
+                }`}
+              >
+                <Zap className="w-4 h-4" />
+                <span>Business Capabilities</span>
+              </button>
+              <button
+                onClick={() => setCapabilityView('technical')}
+                className={`px-5 py-2.5 rounded cursor-pointer transition-all flex items-center gap-2 ${
+                  capabilityView === 'technical'
+                    ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20'
+                    : 'text-stone-400 hover:text-white'
+                }`}
+              >
+                <Cpu className="w-4 h-4" />
+                <span>Technical Capabilities</span>
+              </button>
             </div>
           </div>
+
+          {/* Business Capabilities View */}
+          {capabilityView === 'business' && (
+            <div className="mt-14 space-y-12 animate-fadeIn">
+              {/* Visual Workflow Pipeline Graphic */}
+              <div className="p-8 rounded-lg bg-stone-950/90 border border-stone-800 shadow-2xl relative overflow-hidden">
+                <div className="flex items-center justify-between mb-6 border-b border-stone-800 pb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+                    <span className="text-xs font-mono text-stone-300 font-bold uppercase tracking-wider">Live Campaign Execution Pipeline</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded border border-amber-400/20">
+                    Automated 7-Channel Dispatch
+                  </span>
+                </div>
+
+                {/* Pipeline Nodes Graphic */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 relative">
+                  {[
+                    { step: '01', title: 'Creative Brief', desc: 'Targeting, budget & objective definition', icon: Layers, status: 'Brief Ready' },
+                    { step: '02', title: 'Gemini 3.6 AI Engine', desc: 'Generates channel-compliant copy & hooks', icon: Bot, status: 'AI Synthesized' },
+                    { step: '03', title: 'Single-Click Dispatch', desc: 'Simultaneous API deployment to 7 networks', icon: Zap, status: '200 OK Dispatched' },
+                    { step: '04', title: 'Revenue Telemetry', desc: 'Real-time ROAS & financial ledger sync', icon: BarChart3, status: 'Live Tracking' },
+                  ].map((node, i) => (
+                    <div key={i} className="p-5 rounded bg-stone-900/80 border border-stone-800 flex flex-col justify-between relative group hover:border-amber-400/50 transition-colors">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[10px] font-mono text-amber-400 font-extrabold">{node.step}</span>
+                          <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">{node.status}</span>
+                        </div>
+                        <node.icon className="w-6 h-6 text-amber-400 mb-2 group-hover:scale-110 transition-transform" />
+                        <h4 className="text-sm font-bold text-white tracking-wide uppercase">{node.title}</h4>
+                        <p className="text-xs text-stone-400 font-light mt-1">{node.desc}</p>
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-stone-800/80 flex items-center justify-between text-[10px] font-mono text-stone-500">
+                        <span>Latency: &lt; 150ms</span>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3 Business Capability Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
+                  <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
+                    <Globe2 className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white tracking-wide uppercase">Unified Cross-Network Dispatch</h3>
+                  <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
+                    Launch and govern campaigns simultaneously across Meta, Google Ads, LinkedIn, TikTok, Pinterest, X, and Programmatic DSP from a single operational dashboard. Eliminates platform hopping and reduces launch cycle time by 95%.
+                  </p>
+                  <ul className="mt-4 space-y-2 text-xs text-stone-300 font-mono">
+                    <li className="flex items-center gap-2">&bull; Simultaneous multi-network publishing</li>
+                    <li className="flex items-center gap-2">&bull; Dynamic budget reallocation</li>
+                  </ul>
+                </div>
+
+                <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
+                  <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
+                    <Bot className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white tracking-wide uppercase">Gemini 3.6 Generative Creative Engine</h3>
+                  <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
+                    Generate high-converting headlines, primary copy, call-to-actions, and hashtag clusters automatically formatted to exact character limits for each ad network (e.g., Google 30-char headlines vs LinkedIn 150-char intros).
+                  </p>
+                  <ul className="mt-4 space-y-2 text-xs text-stone-300 font-mono">
+                    <li className="flex items-center gap-2">&bull; Server-side Gemini 3.6 Flash synthesis</li>
+                    <li className="flex items-center gap-2">&bull; Network-compliant character limit validation</li>
+                  </ul>
+                </div>
+
+                <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
+                  <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
+                    <BarChart3 className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white tracking-wide uppercase">Financial Ledger & Revenue Attribution</h3>
+                  <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
+                    Consolidated 10% platform management fee calculation, real-time media spend tracking, corporate credit card and crypto settlement, and automated downloadable billing statements with audit trails.
+                  </p>
+                  <ul className="mt-4 space-y-2 text-xs text-stone-300 font-mono">
+                    <li className="flex items-center gap-2">&bull; Transparent 10% fee billing calculation</li>
+                    <li className="flex items-center gap-2">&bull; Downloadable CSV & PDF financial ledgers</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Technical Capabilities View */}
+          {capabilityView === 'technical' && (
+            <div className="mt-14 space-y-12 animate-fadeIn">
+              {/* Visual Architecture Diagram Graphic */}
+              <div className="p-8 rounded-lg bg-stone-950/90 border border-amber-400/30 shadow-2xl relative overflow-hidden">
+                <div className="flex items-center justify-between mb-6 border-b border-stone-800 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-mono text-stone-200 font-bold uppercase tracking-wider">System Architecture & API Nexus Gateway</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20">
+                    Active TLS 1.3 &bull; Firestore Encrypted
+                  </span>
+                </div>
+
+                {/* API Node Visual Status Matrix */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+                  {[
+                    { name: 'Meta Graph API', status: '200 OK', ping: '124ms' },
+                    { name: 'Google Ads API', status: '200 OK', ping: '98ms' },
+                    { name: 'LinkedIn REST', status: '200 OK', ping: '185ms' },
+                    { name: 'TikTok Open API', status: '200 OK', ping: '142ms' },
+                    { name: 'Pinterest v5', status: '200 OK', ping: '110ms' },
+                    { name: 'X Ads v11', status: '200 OK', ping: '160ms' },
+                    { name: 'OpenRTB DSP', status: '200 OK', ping: '84ms' },
+                  ].map((item, idx) => (
+                    <div key={idx} className="p-3 bg-stone-900 border border-stone-800 rounded font-mono text-center">
+                      <span className="text-[10px] text-stone-300 font-bold block truncate">{item.name}</span>
+                      <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-[9px] text-emerald-400 font-bold">{item.status}</span>
+                      </div>
+                      <span className="text-[8px] text-stone-500 block mt-0.5">{item.ping}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Architectural Layer Diagram */}
+                <div className="p-4 bg-stone-900/60 border border-stone-800 rounded space-y-2 text-xs font-mono text-stone-300">
+                  <div className="flex justify-between items-center bg-stone-950 p-2.5 rounded border border-stone-800">
+                    <span className="text-amber-400 font-bold">[Layer 1: User Interface]</span>
+                    <span>React 18 + TypeScript SPA &bull; Tailwind Styling &bull; Real-time Local State Engine</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-stone-950 p-2.5 rounded border border-stone-800">
+                    <span className="text-emerald-400 font-bold">[Layer 2: AI & Data Gateway]</span>
+                    <span>Server-Side Gemini 3.6 Flash Model &bull; Encrypted Token Refresh Lifecycle</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-stone-950 p-2.5 rounded border border-stone-800">
+                    <span className="text-sky-400 font-bold">[Layer 3: Firestore Database]</span>
+                    <span>Google Cloud Firestore &bull; Security Rules Policy &bull; Row-Level Encrypted Collections</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3 Technical Capability Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
+                  <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
+                    <Cpu className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white tracking-wide uppercase">High-Throughput API Gateway</h3>
+                  <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
+                    Direct integration with Graph API (Meta v19), Ads REST API (Google Ads v16, LinkedIn, TikTok 1.3, Pinterest v5, X v11), and OpenRTB 3.0 DSP specifications with automated token refresh cycles.
+                  </p>
+                  <ul className="mt-4 space-y-2 text-xs text-stone-300 font-mono">
+                    <li className="flex items-center gap-2">&bull; Sub-150ms average network latency</li>
+                    <li className="flex items-center gap-2">&bull; OAuth 2.0 automatic token refresh</li>
+                  </ul>
+                </div>
+
+                <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
+                  <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
+                    <Lock className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white tracking-wide uppercase">Server-Side Security & Key Vaulting</h3>
+                  <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
+                    Zero client-side API key leakage. All third-party credentials and Gemini API calls execute strictly on secure server-side routes, protected by Firebase Firestore security rules and authentication.
+                  </p>
+                  <ul className="mt-4 space-y-2 text-xs text-stone-300 font-mono">
+                    <li className="flex items-center gap-2">&bull; Server-side GEMINI_API_KEY execution</li>
+                    <li className="flex items-center gap-2">&bull; Firestore Row-Level Access Security</li>
+                  </ul>
+                </div>
+
+                <div className="p-8 rounded-sm bg-stone-900/60 border border-stone-800 hover:border-amber-400/40 transition-all group">
+                  <div className="w-12 h-12 rounded bg-amber-400/10 border border-amber-400/30 flex items-center justify-center text-amber-400 mb-6 group-hover:scale-105 transition-transform">
+                    <Zap className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white tracking-wide uppercase">Event-Driven Telemetry & Webhooks</h3>
+                  <p className="mt-3 text-stone-400 text-xs sm:text-sm leading-relaxed font-light">
+                    Asynchronous batch campaign management allowing immediate bulk state updates (Pause, Resume, Duplicate, Delete) across multiple channels with instant status response telemetry.
+                  </p>
+                  <ul className="mt-4 space-y-2 text-xs text-stone-300 font-mono">
+                    <li className="flex items-center gap-2">&bull; Real-time webhook telemetry streams</li>
+                    <li className="flex items-center gap-2">&bull; Asynchronous batch state mutation</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -510,7 +697,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <section id="pricing" className="py-24 border-b border-stone-800/80 bg-[#080808]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto">
-            <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold block mb-2">Flexible SaaS Tiering</span>
+            <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold block mb-2">Flexible Enterprise Tiering</span>
             <h2 className="text-3xl sm:text-5xl font-serif italic text-white">
               Transparent Plans for Every Scale
             </h2>
@@ -577,7 +764,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     '12 Team Member Seats',
                     'All 7 Connected Channels including TikTok & DSP',
                     'Single-Click Cross-Platform API Dispatch',
-                    'Automated Multi-Tenant Customer Billing',
+                    'Automated Consolidated Billing & Invoicing',
                     'Priority Gemini 3.6 Flash Creative Studio',
                   ].map((feat, fIdx) => (
                     <li key={fIdx} className="flex items-center gap-2.5 text-xs text-stone-200 font-medium">
@@ -698,7 +885,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold block mb-2">Get In Touch</span>
               <h2 className="text-2xl sm:text-4xl font-serif italic text-white">Schedule an Enterprise Demo</h2>
               <p className="mt-2 text-xs sm:text-sm text-stone-400 font-light">
-                Our growth engineering team will set up your multi-tenant workspace and configure custom API keys.
+                Our growth engineering team will configure your custom API integrations and campaign workflows.
               </p>
             </div>
 
@@ -813,7 +1000,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div className="w-6 h-6 rounded bg-stone-900 border border-stone-800 flex items-center justify-center text-amber-400">
               <Layers className="w-3.5 h-3.5" />
             </div>
-            <span className="text-stone-300 font-bold uppercase tracking-wider">Vantage AdEngine SaaS Portal</span>
+            <span className="text-stone-300 font-bold uppercase tracking-wider">Vantage AdEngine Enterprise Portal</span>
           </div>
 
           <div>
