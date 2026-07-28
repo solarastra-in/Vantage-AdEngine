@@ -13,6 +13,7 @@ export const CreativeFatigueWidget: React.FC<CreativeFatigueWidgetProps> = ({ ca
   const [loading, setLoading] = useState(true);
 
   const activeCampaigns = campaigns.filter(c => c.status === 'active').slice(0, 3);
+  const activeCampaignIdsKey = activeCampaigns.map(c => c.id).join(',');
 
   useEffect(() => {
     let cancelled = false;
@@ -59,7 +60,7 @@ export const CreativeFatigueWidget: React.FC<CreativeFatigueWidgetProps> = ({ ca
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCampaigns.map(c => c.id).join(','), timeSeries.length]);
+  }, [activeCampaignIdsKey, timeSeries.length]);
 
   if (activeCampaigns.length === 0) {
     return <div className="text-[11px] text-stone-500 font-mono p-2">No active campaigns to assess.</div>;

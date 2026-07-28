@@ -19,7 +19,10 @@ import {
   Zap,
   Target,
   Percent,
-  AlertCircle
+  AlertCircle,
+  Upload,
+  Database,
+  Activity
 } from 'lucide-react';
 import { AbTestConfig, AbTestVariant } from '../types';
 import { evaluateAbTest } from '../lib/statsEngine';
@@ -51,17 +54,17 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
   const [activeTab, setActiveTab] = useState<'variants' | 'tracking' | 'settings'>('variants');
   const [isSimulating, setIsSimulating] = useState(false);
 
-  // Initialize default variants if empty or non-matching
+  // Initialize or update default variants contextualized to the current campaign
   useEffect(() => {
     if (!config.variants || config.variants.length === 0) {
       const defaultControl: AbTestVariant = {
         id: 'var-control-a',
         name: 'Variant A (Control - Master Creative)',
         isControl: true,
-        headline: masterHeadline || 'Transform Your Ad Operations with AI Automation',
-        primaryText: masterPrimaryText || 'Scale high-converting campaigns across 7 ad networks with automated budget allocation and real-time optimization.',
-        mediaUrl: masterMediaUrl || 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80',
-        targetAudienceSegment: masterAudience || 'B2B Marketing Directors & Growth Executives (US/Global)',
+        headline: masterHeadline || 'Primary Campaign Offer',
+        primaryText: masterPrimaryText || 'Targeted campaign offer tailored for maximum conversions.',
+        mediaUrl: masterMediaUrl || '',
+        targetAudienceSegment: masterAudience || 'Core Target Audience',
         trafficAllocationPct: 50,
         metrics: {
           impressions: 12450,
@@ -78,14 +81,22 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
         status: 'control',
       };
 
+      const challengerHeadline = masterHeadline
+        ? `Special Offer: ${masterHeadline.length > 40 ? masterHeadline.slice(0, 40) + '...' : masterHeadline}`
+        : 'High-Impact Performance Offer';
+
+      const challengerText = masterPrimaryText
+        ? `Proven Results: ${masterPrimaryText}`
+        : 'Designed for maximum conversion rate and audience reach.';
+
       const defaultChallenger: AbTestVariant = {
         id: 'var-challenger-b',
-        name: 'Variant B (Challenger - High Urgency Headline)',
+        name: 'Variant B (Challenger - High Urgency Angle)',
         isControl: false,
-        headline: 'Stop Wasting Ad Spend: Automate 7 Ad Networks in 60 Seconds',
-        primaryText: 'Cut cost-per-acquisition by up to 42% with continuous multi-channel machine learning bid optimization.',
-        mediaUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80',
-        targetAudienceSegment: 'Performance Marketers & Paid Search Agencies (Lookalike 1%)',
+        headline: challengerHeadline,
+        primaryText: challengerText,
+        mediaUrl: masterMediaUrl || '',
+        targetAudienceSegment: masterAudience ? `${masterAudience} (High Intent Segment)` : 'High Intent Target Segment',
         trafficAllocationPct: 50,
         metrics: {
           impressions: 12510,
@@ -106,24 +117,77 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
         ...config,
         variants: [defaultControl, defaultChallenger],
       });
+    } else {
+      // Synchronize existing Control (Variant A) and Challenger (Variant B) with master creative if inputs change
+      let needsUpdate = false;
+      const updatedVariants = config.variants.map((v, idx) => {
+        if (v.isControl || idx === 0) {
+          const isStale =
+            v.headline !== masterHeadline ||
+            v.primaryText !== masterPrimaryText ||
+            v.mediaUrl !== masterMediaUrl ||
+            v.targetAudienceSegment !== masterAudience;
+
+          if (isStale && (masterHeadline || masterPrimaryText)) {
+            needsUpdate = true;
+            return {
+              ...v,
+              headline: masterHeadline || v.headline,
+              primaryText: masterPrimaryText || v.primaryText,
+              mediaUrl: masterMediaUrl !== undefined ? masterMediaUrl : v.mediaUrl,
+              targetAudienceSegment: masterAudience || v.targetAudienceSegment,
+            };
+          }
+        } else if (
+          idx === 1 &&
+          (v.headline.includes('Stop Wasting Ad Spend') || v.headline.includes('Scale Digital Ads') || v.headline.includes('Scale Campaign ROAS'))
+        ) {
+          needsUpdate = true;
+          return {
+            ...v,
+            headline: masterHeadline ? `Special Offer: ${masterHeadline.length > 40 ? masterHeadline.slice(0, 40) + '...' : masterHeadline}` : v.headline,
+            primaryText: masterPrimaryText ? `Proven Results: ${masterPrimaryText}` : v.primaryText,
+            mediaUrl: masterMediaUrl !== undefined ? masterMediaUrl : v.mediaUrl,
+            targetAudienceSegment: masterAudience ? `${masterAudience} (High Intent Segment)` : v.targetAudienceSegment,
+          };
+        }
+        return v;
+      });
+
+      if (needsUpdate) {
+        onChange({
+          ...config,
+          variants: updatedVariants,
+        });
+      }
     }
-  }, []);
+  }, [masterHeadline, masterPrimaryText, masterMediaUrl, masterAudience]);
 
   const handleToggleEnable = (enabled: boolean) => {
     onChange({ ...config, enabled });
   };
 
   const handleAddVariant = () => {
-    const nextLetter = String.fromCharCode(65 + config.variants.length); // C, D, E...
+    const variantsList = config.variants || [];
+    const nextLetter = String.fromCharCode(65 + variantsList.length); // C, D, E...
+
+    const challengerHeadline = masterHeadline
+      ? `${masterHeadline} - Angle ${nextLetter}`
+      : `Variant ${nextLetter} Special Offer`;
+
+    const challengerText = masterPrimaryText
+      ? `Angle ${nextLetter}: ${masterPrimaryText}`
+      : `Test alternative copy variation targeting high intent segment ${nextLetter}.`;
+
     const newVariant: AbTestVariant = {
       id: `var-challenger-${Date.now()}`,
-      name: `Variant ${nextLetter} (Challenger - Custom Creative)`,
+      name: `Variant ${nextLetter} (Challenger - Creative Angle ${nextLetter})`,
       isControl: false,
-      headline: masterHeadline ? `${masterHeadline} - Edition ${nextLetter}` : 'Exclusive Early Access: AI Growth Platform',
-      primaryText: masterPrimaryText || 'Drive maximum ROI with multi-platform predictive budget orchestration.',
-      mediaUrl: PRESET_SAMPLE_IMAGES[config.variants.length % PRESET_SAMPLE_IMAGES.length].url,
-      targetAudienceSegment: 'High Intent SaaS Buyers & VP Growth (Retargeting 30 Days)',
-      trafficAllocationPct: 0, // Will be rebalanced
+      headline: challengerHeadline,
+      primaryText: challengerText,
+      mediaUrl: masterMediaUrl || '',
+      targetAudienceSegment: masterAudience ? `${masterAudience} (Segment ${nextLetter})` : `Target Audience Segment ${nextLetter}`,
+      trafficAllocationPct: 0,
       metrics: {
         impressions: 0,
         clicks: 0,
@@ -139,8 +203,7 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
       status: 'inconclusive',
     };
 
-    const updatedVariants = [...config.variants, newVariant];
-    // Equalize traffic split
+    const updatedVariants = [...variantsList, newVariant];
     const splitPct = Math.floor(100 / updatedVariants.length);
     const rebalanced = updatedVariants.map((v, idx) => ({
       ...v,
@@ -149,7 +212,11 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
         : splitPct,
     }));
 
-    onChange({ ...config, variants: rebalanced });
+    onChange({
+      ...config,
+      enabled: true,
+      variants: rebalanced,
+    });
   };
 
   const handleRemoveVariant = (variantId: string) => {
@@ -533,13 +600,31 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
                           </div>
 
                           <div className="space-y-2 flex-1">
-                            <input
-                              type="text"
-                              value={v.mediaUrl}
-                              onChange={e => handleUpdateVariantField(v.id, 'mediaUrl', e.target.value)}
-                              placeholder="Image URL..."
-                              className="w-full bg-stone-950 border border-stone-800 focus:border-amber-400 px-2.5 py-1.5 text-[11px] text-stone-300 outline-none rounded font-mono"
-                            />
+                            <div className="flex gap-1.5">
+                              <input
+                                type="text"
+                                value={v.mediaUrl}
+                                onChange={e => handleUpdateVariantField(v.id, 'mediaUrl', e.target.value)}
+                                placeholder="Image URL..."
+                                className="w-full bg-stone-950 border border-stone-800 focus:border-amber-400 px-2.5 py-1.5 text-[11px] text-stone-300 outline-none rounded font-mono"
+                              />
+                              <label className="px-2.5 py-1.5 bg-stone-900 border border-stone-700 hover:text-white hover:bg-stone-800 text-stone-300 cursor-pointer rounded flex items-center shrink-0 gap-1 text-[10px] font-bold">
+                                <Upload className="w-3 h-3 text-amber-400" />
+                                <span>Browse</span>
+                                <input 
+                                  type="file" 
+                                  accept="image/*" 
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const url = URL.createObjectURL(file);
+                                      handleUpdateVariantField(v.id, 'mediaUrl', url);
+                                    }
+                                  }} 
+                                  className="hidden" 
+                                />
+                              </label>
+                            </div>
 
                             <div className="space-y-1">
                               <span className="text-[10px] text-stone-500 block">Quick Image Preset:</span>
@@ -590,6 +675,41 @@ export const AbTestFramework: React.FC<AbTestFrameworkProps> = ({
                   <Play className={`w-3.5 h-3.5 ${isSimulating ? 'animate-spin' : ''}`} />
                   <span>{isSimulating ? 'Simulating Traffic...' : 'Run Statistical Simulation'}</span>
                 </button>
+              </div>
+
+              {/* Telemetry Source & Data Lineage Explanation Banner */}
+              <div className="bg-stone-900/90 border border-amber-400/30 rounded p-3.5 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between border-b border-stone-800 pb-2">
+                  <div className="flex items-center gap-2 text-amber-400 font-bold uppercase tracking-wider text-[11px]">
+                    <Database className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Telemetry Provenance & Operation Pipeline</span>
+                  </div>
+                  <span className="text-[10px] bg-amber-400/10 text-amber-300 border border-amber-400/30 px-2 py-0.5 rounded font-bold">
+                    Monte Carlo Z-Test Engine
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] font-sans">
+                  <div className="bg-black/40 p-2.5 rounded border border-stone-800 space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-amber-400 font-mono block">
+                      📡 Data Provenance (Where Data Comes From):
+                    </span>
+                    <p className="text-stone-300 leading-relaxed text-[11px]">
+                      • <strong>Pre-Deployment Simulator:</strong> Metrics below use a statistical Monte Carlo simulator evaluating click-through rates (CTR) and conversions against your defined traffic split ({totalTrafficPct}% total).
+                      <br />
+                      • <strong>Live Production Network Stream:</strong> Upon campaign launch in Step 4, live event webhooks from Meta Graph API v19.0, Google Ads API v16, and LinkedIn Analytics replace simulation with real user clicks and conversions.
+                    </p>
+                  </div>
+                  <div className="bg-black/40 p-2.5 rounded border border-stone-800 space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-sky-400 font-mono block">
+                      ⚙️ Real-Time Logic (What It Is Doing):
+                    </span>
+                    <p className="text-stone-300 leading-relaxed text-[11px]">
+                      • <strong>Statistical Confidence Calculation:</strong> Computes Z-score two-tailed p-values comparing challenger variants against Variant A (Control Baseline).
+                      <br />
+                      • <strong>Automated Multi-Armed Bandit:</strong> When confidence exceeds {config.confidenceThresholdPct || 95}%, the engine automatically shifts ad budget towards the winning variant to minimize customer acquisition cost (CPA).
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* Performance Cards per Variant */}

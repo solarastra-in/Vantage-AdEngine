@@ -65,6 +65,8 @@ interface MarketIntelligenceProps {
   timeSeries: PerformanceTimePoint[];
   onOpenWizard: () => void;
   onSelectCampaign: (campaign: Campaign) => void;
+  currency?: string;
+  locale?: string;
 }
 
 export type WidgetType = 
@@ -97,7 +99,16 @@ export const MarketIntelligence: React.FC<MarketIntelligenceProps> = ({
   timeSeries,
   onOpenWizard,
   onSelectCampaign,
+  currency = 'USD',
+  locale = 'en-US',
 }) => {
+  const formatCurrency = (val: number) => {
+    try {
+      return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(val);
+    } catch {
+      return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+  };
   // 1. Data Collection & Sync Pipeline State
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string>(new Date().toLocaleTimeString());
@@ -358,10 +369,12 @@ export const MarketIntelligence: React.FC<MarketIntelligenceProps> = ({
     }
   };
 
+  const selectedPlatformsKey = selectedPlatforms.join(',');
+
   React.useEffect(() => {
     recomputeBudgetPlan();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(selectedPlatforms)]);
+  }, [selectedPlatformsKey]);
 
   // Chart data formatted
   const donutChartData = selectedPlatforms.map(p => ({

@@ -29,7 +29,8 @@ import {
   saveInvoiceToFirestore,
   seedFirestoreIfEmpty,
   resolveAuthorizedOrgForUser,
-  onboardNewOrganization
+  onboardNewOrganization,
+  EmployeePermissions
 } from './lib/firestoreService';
 import { auth, onAuthStateChanged, signOutUser, signInWithGoogle, User } from './lib/firebase';
 import { Menu } from 'lucide-react';
@@ -41,21 +42,18 @@ export function App() {
   // Tenant Workspace State
   const [organizations, setOrganizations] = useState<Organization[]>(INITIAL_ORGANIZATIONS);
   const [currentOrgId, setCurrentOrgId] = useState<string>('org-astracloud');
-  const [userRole, setUserRole] = useState<'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER'>('SUPER_ADMIN');
+  const [userRole, setUserRole] = useState<'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER'>('TENANT_USER');
+  const [userPermissions, setUserPermissions] = useState<EmployeePermissions | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   /**
    * Real authentication gate. A signed-in Firebase user alone is NOT
    * sufficient to reach the portal -- their email must be authorized as an
    * employee of some organization (resolveAuthorizedOrgForUser in
-   * firestoreService.ts). Previously, "Launch App" skipped this check
-   * entirely (bare setViewState('portal')) and "Continue with Google"
-   * navigated to the portal the instant sign-in succeeded, regardless of
-   * whether that account belonged to any customer of the platform.
+   * firestoreService.ts).
    */
   const [authStatus, setAuthStatus] = useState<'checking' | 'unauthenticated' | 'not_authorized' | 'authorized'>('checking');
   const [authDeniedMessage, setAuthDeniedMessage] = useState<string | null>(null);
-  const [demoMode, setDemoMode] = useState(false); // true only for the dev-only "Instant Demo" shortcuts
 
   /**
    * When a "Create Organization" onboarding flow triggers signInWithGoogle,
@@ -94,8 +92,6 @@ export function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
 
-      if (demoMode) return; // demo shortcuts manage their own state directly
-
       if (!user) {
         setAuthStatus('unauthenticated');
         return;
@@ -113,6 +109,7 @@ export function App() {
           setAuthDeniedMessage(null);
           setCurrentOrgId(profile.orgId);
           setUserRole(profile.role);
+          setUserPermissions(profile.permissions ?? null);
           setAuthStatus('authorized');
           setViewState('portal');
         } catch (err) {
@@ -131,6 +128,7 @@ export function App() {
         setAuthDeniedMessage(null);
         setCurrentOrgId(result.profile.orgId);
         setUserRole(result.profile.role);
+        setUserPermissions(result.profile.permissions ?? null);
         setAuthStatus('authorized');
         // A returning, already-authorized user reloading the page (or
         // completing sign-in from the landing page) should land straight
@@ -151,7 +149,7 @@ export function App() {
     });
     return () => unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demoMode]);
+  }, []);
 
   /** Normal sign-in: resolution happens in the effect above. */
   const handleGoogleSignIn = async () => {
@@ -489,29 +487,16 @@ export function App() {
       {/* 1. PUBLIC SAAS LANDING PAGE */}
       {viewState === 'landing' && (
         <LandingPage
-          isAuthorized={authStatus === 'authorized' || demoMode}
+          isAuthorized={authStatus === 'authorized'}
           authDeniedMessage={authDeniedMessage}
           onDismissAuthDenied={() => setAuthDeniedMessage(null)}
           onNavigateToPortal={() => {
-            // Only reachable when isAuthorized is true (LandingPage gates
-            // this itself), but double-checked here as well -- this is
-            // the function that was previously called unconditionally by
-            // "Launch App" with no auth check at all.
-            if (authStatus === 'authorized' || demoMode) setViewState('portal');
+            if (authStatus === 'authorized') {
+              setViewState(userRole === 'SUPER_ADMIN' ? 'super-admin' : 'portal');
+            }
           }}
           onGoogleSignIn={handleGoogleSignIn}
           onGoogleSignInForOnboarding={handleGoogleSignInForOnboarding}
-          onLoginSuperAdminDemo={() => {
-            setDemoMode(true);
-            setUserRole('SUPER_ADMIN');
-            setViewState('super-admin');
-          }}
-          onLoginTenantAdminDemo={() => {
-            setDemoMode(true);
-            setUserRole('TENANT_ADMIN');
-            setCurrentOrgId('org-astracloud');
-            setViewState('portal');
-          }}
         />
       )}
 
@@ -590,8 +575,8 @@ export function App() {
                 onOpenSuperAdminPanel={() => setViewState('super-admin')}
                 onSignOut={async () => {
                   await signOutUser();
-                  setDemoMode(false);
                   setAuthStatus('unauthenticated');
+                  setUserPermissions(null);
                   setViewState('landing');
                 }}
                 currentUserEmail={currentUser?.email || undefined}
@@ -603,6 +588,8 @@ export function App() {
               {(() => {
                 const currentOrg = organizations.find(o => o.id === currentOrgId) || organizations[0];
                 const isPendingApproval = currentOrg?.status === 'Pending Approval' && userRole !== 'SUPER_ADMIN';
+                const currentCurrency = currentOrg?.currency ?? 'USD';
+                const currentLocale = currentOrg?.locale ?? 'en-US';
 
                 if (isPendingApproval) {
                   return (
@@ -627,6 +614,8 @@ export function App() {
                         }}
                         onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
                         onSelectCampaign={(c) => setSelectedCampaign(c)}
+                        currency={currentCurrency}
+                        locale={currentLocale}
                       />
                     )}
 
@@ -647,17 +636,17 @@ export function App() {
                     )}
 
                     {activeTab === 'analytics' && (
-                      <CommandCenter
+                      <MarketIntelligence
                         campaigns={campaigns}
                         channels={channels}
-                        invoices={invoices}
                         timeSeries={timeSeries}
                         onOpenWizard={() => {
                           setAiWizardInitialData(null);
                           setIsWizardOpen(true);
                         }}
-                        onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
                         onSelectCampaign={(c) => setSelectedCampaign(c)}
+                        currency={currentCurrency}
+                        locale={currentLocale}
                       />
                     )}
 
@@ -672,6 +661,8 @@ export function App() {
                         channels={channels}
                         onTestChannel={handleTestChannel}
                         orgId={currentOrgId}
+                        currentUserRole={userRole}
+                        currentUserPermissions={userPermissions}
                       />
                     )}
 
@@ -681,6 +672,8 @@ export function App() {
                         onSelectInvoice={(inv) => setSelectedInvoice(inv)}
                         onPayInvoice={handlePayInvoice}
                         onAddAuditLogEntry={handleAddAuditLogEntry}
+                        currency={currentCurrency}
+                        locale={currentLocale}
                       />
                     )}
 
@@ -689,7 +682,7 @@ export function App() {
                         orgId={currentOrgId}
                         currentUserEmail={currentUser?.email || undefined}
                         currentUserRole={userRole}
-                        currentUserPermissions={null}
+                        currentUserPermissions={userPermissions}
                       />
                     )}
                   </>
@@ -703,6 +696,7 @@ export function App() {
       {/* Global Modals */}
       <CampaignWizardModal
         isOpen={isWizardOpen}
+        orgId={currentOrgId}
         initialAiData={aiWizardInitialData}
         onClose={() => {
           setIsWizardOpen(false);

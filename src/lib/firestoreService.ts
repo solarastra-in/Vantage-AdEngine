@@ -95,6 +95,10 @@ export interface Organization {
   createdAt: string;
   channelsConfigured: number;
   activeCampaignsCount?: number;
+  /** ISO 4217 currency code (e.g. USD, EUR, INR) all monetary figures for this org are displayed in. Defaults to USD. */
+  currency?: string;
+  /** BCP 47 locale (e.g. en-US, en-IN, de-DE) driving number/date formatting conventions. Defaults to en-US. */
+  locale?: string;
 }
 
 export interface ContactLead {
@@ -115,6 +119,8 @@ export interface UserProfile {
   role: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER';
   orgId: string;
   createdAt: string;
+  /** Absent for SUPER_ADMIN (platform operators aren't scoped by these permissions -- they can do everything). */
+  permissions?: EmployeePermissions;
 }
 
 export interface EmployeePermissions {
@@ -660,6 +666,7 @@ export const resolveAuthorizedOrgForUser = async (
     role: invite.role,
     orgId,
     createdAt: new Date().toISOString(),
+    permissions: invite.permissions,
   };
 
   await setDoc(doc(db, 'users', uid), profile);
@@ -687,7 +694,9 @@ export const onboardNewOrganization = async (
   orgName: string,
   uid: string,
   email: string,
-  displayName: string
+  displayName: string,
+  currency: string = 'USD',
+  locale: string = 'en-US'
 ): Promise<UserProfile> => {
   const orgId = `org-${orgName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'new'}-${Date.now().toString(36)}`;
 
@@ -703,6 +712,8 @@ export const onboardNewOrganization = async (
     createdAt: new Date().toISOString(),
     channelsConfigured: 0,
     activeCampaignsCount: 0,
+    currency,
+    locale,
   };
 
   await setDoc(doc(db, 'organizations', orgId), newOrg);
@@ -764,4 +775,46 @@ export const listInvitedEmployees = async (orgId: string): Promise<InvitedEmploy
 export const removeInvitedEmployee = async (orgId: string, email: string): Promise<void> => {
   await deleteDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)));
 };
+
+// 7. Omnichannel Campaign & Multi-Aspect Asset Wizard Step Persistence
+export interface WizardDraft {
+  id: string;
+  step: number;
+  updatedAt: string;
+  lastSavedStepName: string;
+  stepData: any;
+}
+
+export const saveWizardDraftToFirestore = async (orgId: string, draft: WizardDraft) => {
+  try {
+    const draftRef = doc(db, `organizations/${orgId}/wizardDrafts`, draft.id);
+    await setDoc(draftRef, draft);
+  } catch (error) {
+    console.error(`Error saving wizard draft to Firestore:`, error);
+  }
+};
+
+export const fetchWizardDraftFromFirestore = async (orgId: string, draftId = 'active_wizard_draft'): Promise<WizardDraft | null> => {
+  try {
+    const draftRef = doc(db, `organizations/${orgId}/wizardDrafts`, draftId);
+    const snap = await getDoc(draftRef);
+    if (snap.exists()) {
+      return snap.data() as WizardDraft;
+    }
+    return null;
+  } catch (error) {
+    console.warn(`Error fetching wizard draft from Firestore:`, error);
+    return null;
+  }
+};
+
+export const deleteWizardDraftFromFirestore = async (orgId: string, draftId = 'active_wizard_draft') => {
+  try {
+    const draftRef = doc(db, `organizations/${orgId}/wizardDrafts`, draftId);
+    await deleteDoc(draftRef);
+  } catch (error) {
+    console.warn(`Error deleting wizard draft from Firestore:`, error);
+  }
+};
+
 

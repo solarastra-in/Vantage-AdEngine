@@ -62,6 +62,9 @@ service cloud.firestore {
       match /invoices/{invoiceId} {
         allow read, write: if true;
       }
+      match /wizardDrafts/{draftId} {
+        allow read, write: if true;
+      }
     }
     
     // User profile mappings: a signed-in user may only read/write their own

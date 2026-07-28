@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ChannelApiStatus, PlatformType, TestSuiteSummary, ChannelTestResult, ChannelCredentials, CUJScenario, UserRole } from '../types';
-import { fetchChannelCredentialsFromFirestore, saveChannelCredentialsToFirestore, DEFAULT_CHANNEL_CREDENTIALS } from '../lib/firestoreService';
+import { ChannelApiStatus, PlatformType, TestSuiteSummary, ChannelTestResult, ChannelCredentials, CUJScenario } from '../types';
+import { fetchChannelCredentialsFromFirestore, saveChannelCredentialsToFirestore, DEFAULT_CHANNEL_CREDENTIALS, EmployeePermissions } from '../lib/firestoreService';
 import { validateChannelApiKeyFormat } from '../lib/encryption';
 import { 
   Network, 
@@ -73,13 +73,13 @@ interface ApiNexusProps {
   channels: ChannelApiStatus[];
   onTestChannel: (platform: PlatformType) => Promise<any>;
   orgId?: string;
+  currentUserRole: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER';
+  currentUserPermissions: EmployeePermissions | null;
 }
 
-export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, orgId = 'org-astracloud' }) => {
+export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, orgId = 'org-astracloud', currentUserRole, currentUserPermissions }) => {
+  const canEditCredentials = currentUserRole === 'SUPER_ADMIN' || currentUserPermissions?.canEditCredentials === true;
   const [activeTab, setActiveTab] = useState<'suite' | 'credentials' | 'ai-payload' | 'gateways' | 'alerts'>('suite');
-
-  // Active Role Simulation for RBAC
-  const [activeRole, setActiveRole] = useState<UserRole>('SUPER_ADMIN');
 
   // Real-time API Health & Status Indicators
   const [channelStatuses, setChannelStatuses] = useState<Record<string, {
@@ -563,8 +563,8 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, org
   // Save Channel Credentials. Plaintext secret goes to server vault (AES-256-GCM);
   // only masked placeholder & fingerprint are stored in Firestore.
   const handleSaveCredential = async (platform: PlatformType) => {
-    if (activeRole === 'READ_ONLY_ANALYST' || activeRole === 'FINANCE_ADMIN') {
-      alert(`Role ${activeRole} is not permitted to modify API credentials.`);
+    if (!canEditCredentials) {
+      alert(`Your role (${currentUserRole}) does not have permission to modify API credentials.`);
       return;
     }
 
@@ -1235,30 +1235,22 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, org
               </div>
             </div>
 
-            {/* Role Switcher Toolbar for Testing RBAC */}
+            {/* Real RBAC status -- reflects the signed-in user's actual
+                role and permissions (set by their tenant admin at invite
+                time, or SUPER_ADMIN for recognized platform operators). */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs">
               <div className="flex items-center gap-2">
                 <UserCheck className="w-4 h-4 text-amber-400" />
-                <span className="text-stone-400 font-bold uppercase text-[10px]">Active RBAC Persona:</span>
-                {(['SUPER_ADMIN', 'CAMPAIGN_MANAGER', 'FINANCE_ADMIN', 'READ_ONLY_ANALYST'] as UserRole[]).map(role => (
-                  <button
-                    key={role}
-                    onClick={() => setActiveRole(role)}
-                    className={`px-2.5 py-1 text-[10px] font-bold uppercase rounded border transition-colors cursor-pointer ${
-                      activeRole === role
-                        ? 'bg-amber-400 text-black border-amber-400'
-                        : 'bg-stone-900 text-stone-400 border-stone-800 hover:text-white'
-                    }`}
-                  >
-                    {role.replace('_', ' ')}
-                  </button>
-                ))}
+                <span className="text-stone-400 font-bold uppercase text-[10px]">Your RBAC Grant:</span>
+                <span className="px-2.5 py-1 text-[10px] font-bold uppercase rounded border bg-amber-400 text-black border-amber-400">
+                  {currentUserRole.replace('_', ' ')}
+                </span>
               </div>
 
               <div className="text-[10px] text-stone-500 italic">
-                {activeRole === 'READ_ONLY_ANALYST' || activeRole === 'FINANCE_ADMIN' ? (
+                {!canEditCredentials ? (
                   <span className="text-amber-400 flex items-center gap-1">
-                    <ShieldAlert className="w-3 h-3 inline" /> Credential Edit Restricted for {activeRole}
+                    <ShieldAlert className="w-3 h-3 inline" /> Credential Edit Restricted -- ask your Tenant Admin to grant this privilege
                   </span>
                 ) : (
                   <span className="text-emerald-400 flex items-center gap-1">
@@ -1441,7 +1433,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, org
                       <label className="block text-[10px] text-stone-400 uppercase font-bold mb-1">{cfg.accLabel}</label>
                       <input
                         type="text"
-                        disabled={activeRole === 'READ_ONLY_ANALYST'}
+                        disabled={!canEditCredentials}
                         value={cred.accountId || ''}
                         onChange={(e) => handleCredentialChange(cfg.platform, 'accountId', e.target.value)}
                         className="w-full bg-stone-950 border border-stone-800 text-stone-200 px-3 py-2 text-xs font-mono rounded focus:border-amber-400 focus:outline-none disabled:opacity-50"
@@ -1453,7 +1445,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, org
                       <label className="block text-[10px] text-stone-400 uppercase font-bold mb-1">{cfg.secLabel}</label>
                       <input
                         type="text"
-                        disabled={activeRole === 'READ_ONLY_ANALYST'}
+                        disabled={!canEditCredentials}
                         value={cfg.useSecret ? cred.developerToken || cred.apiSecret || '' : cred.pixelIdOrTag || cred.merchantOrCompanyUrn || ''}
                         onChange={(e) => handleCredentialChange(cfg.platform, cfg.useSecret ? 'developerToken' : 'pixelIdOrTag', e.target.value)}
                         className="w-full bg-stone-950 border border-stone-800 text-stone-200 px-3 py-2 text-xs font-mono rounded focus:border-amber-400 focus:outline-none disabled:opacity-50"
@@ -1471,7 +1463,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, org
                       <div className="relative">
                         <input
                           type="password"
-                          disabled={activeRole === 'READ_ONLY_ANALYST'}
+                          disabled={!canEditCredentials}
                           value={cred.apiKeyOrToken || ''}
                           onChange={(e) => handleCredentialChange(cfg.platform, 'apiKeyOrToken', e.target.value)}
                           className="w-full bg-stone-950 border border-stone-800 text-stone-200 pl-3 pr-28 py-2 text-xs font-mono rounded focus:border-amber-400 focus:outline-none disabled:opacity-50"
@@ -1568,7 +1560,7 @@ export const ApiNexus: React.FC<ApiNexusProps> = ({ channels, onTestChannel, org
                       <button
                         type="button"
                         onClick={() => handleSaveCredential(cfg.platform)}
-                        disabled={savingPlatform === cfg.platform || activeRole === 'READ_ONLY_ANALYST'}
+                        disabled={savingPlatform === cfg.platform || !canEditCredentials}
                         className="bg-amber-400 hover:bg-amber-300 text-black px-4 py-1.5 text-xs font-bold rounded cursor-pointer transition-colors flex items-center gap-1.5 disabled:opacity-40 font-mono"
                       >
                         <Save className="w-3.5 h-3.5" />

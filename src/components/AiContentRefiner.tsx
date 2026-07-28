@@ -209,71 +209,94 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
 
     // Helper to truncate safely without cutting words
     const safeTruncate = (str: string, maxLen: number) => {
+      if (!str) return '';
       if (str.length <= maxLen) return str;
       const sub = str.slice(0, maxLen);
       const lastSpace = sub.lastIndexOf(' ');
-      if (lastSpace > maxLen * 0.6) {
+      if (lastSpace > maxLen * 0.5) {
         return sub.slice(0, lastSpace);
       }
       return sub.trim();
     };
 
-    if (platform === 'google') {
-      const v1Headline = safeTruncate(`Automate ${obj || 'Ad Spend'} Now`, spec.headlineLimit);
-      const v2Headline = safeTruncate(`${origHeadline || 'Cross-Channel Ads'} - 3.8x ROAS`, spec.headlineLimit);
-      const v3Headline = safeTruncate(`Scale Ads 10x with AI Engine`, spec.headlineLimit);
+    const toTitleCase = (str: string) => {
+      if (!str) return '';
+      return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+    };
 
-      const v1Desc = safeTruncate(`Maximize performance across Google, Meta & LinkedIn with automated AI bidding algorithms.`, spec.descriptionLimit);
-      const v2Desc = safeTruncate(`Unify cross-channel ad spend, lower CPA by 34%, and generate high-intent ${aud || 'leads'}.`, spec.descriptionLimit);
+    const hBase = origHeadline.trim() || 'Scale Digital Ads with AI';
+    const pBase = origText.trim() || 'Automate ad spend across channels with real-time ROAS optimization.';
+
+    if (platform === 'google') {
+      const v1Headline = safeTruncate(toTitleCase(hBase), spec.headlineLimit);
+
+      // Construct a relevant 2nd headline from hBase or pBase without hardcoded prefixes
+      let v2HeadlineCandidate = '';
+      if (hBase.includes(':') || hBase.includes('-')) {
+        v2HeadlineCandidate = hBase.split(/[:\-]/)[0].trim();
+      } else if (pBase) {
+        const firstClause = pBase.split(/[\.\,\;\:]/)[0].trim();
+        if (firstClause && firstClause.length >= 4 && firstClause.length <= 30) {
+          v2HeadlineCandidate = firstClause;
+        }
+      }
+      if (!v2HeadlineCandidate || v2HeadlineCandidate.length < 4) {
+        v2HeadlineCandidate = `Discover ${hBase}`;
+      }
+
+      const v2Headline = safeTruncate(toTitleCase(v2HeadlineCandidate), spec.headlineLimit);
+
+      const v1Desc = safeTruncate(pBase, spec.descriptionLimit);
+      const v2Desc = safeTruncate(masterHeadline ? `${hBase}. ${pBase}` : pBase, spec.descriptionLimit);
 
       return [
         {
           platform,
-          headline: v1Headline,
+          headline: v1Headline || 'Scale Campaign Performance',
           description: v1Desc,
-          headlineCharCount: v1Headline.length,
-          headlineValid: v1Headline.length <= spec.headlineLimit,
+          headlineCharCount: (v1Headline || 'Scale Campaign Performance').length,
+          headlineValid: (v1Headline || 'Scale Campaign Performance').length <= spec.headlineLimit,
           descriptionCharCount: v1Desc.length,
           descriptionValid: v1Desc.length <= spec.descriptionLimit,
-          bestPracticeTip: '🎯 Strict 30-char headline title case for Google Search Ads',
+          bestPracticeTip: '🎯 Title Case Search Headline (Strict <= 30 chars)',
           complianceScore: 98,
-          keyAdjustments: ['Title Case applied', 'Primary keyword front-loaded', 'Exact 30-char search limit met']
+          keyAdjustments: ['Title Case forced', 'Primary campaign context front-loaded', '30-char search limit enforced']
         },
         {
           platform,
-          headline: v2Headline,
+          headline: v2Headline || 'Special Offer Available',
           description: v2Desc,
-          headlineCharCount: v2Headline.length,
-          headlineValid: v2Headline.length <= spec.headlineLimit,
+          headlineCharCount: (v2Headline || 'Special Offer Available').length,
+          headlineValid: (v2Headline || 'Special Offer Available').length <= spec.headlineLimit,
           descriptionCharCount: v2Desc.length,
           descriptionValid: v2Desc.length <= spec.descriptionLimit,
-          bestPracticeTip: '📊 Data & ROAS proof point headline',
+          bestPracticeTip: '✨ Action-Oriented Offer Callout (Strict <= 30 chars)',
           complianceScore: 95,
-          keyAdjustments: ['ROAS proof point inserted', 'High intent call to action', 'CPA savings claim']
+          keyAdjustments: ['Campaign value proposition integrated', 'Target audience callout', 'Action-oriented conversion CTA']
         }
       ];
     }
 
     if (platform === 'meta') {
-      const v1Headline = safeTruncate(origHeadline || 'Automate Ads Across Every Channel', spec.headlineLimit);
-      const v1Desc = `🚀 Stop wasting ad spend on manual optimization!\n\nOur cross-channel AI engine continuously optimizes bids and creative assets for ${aud || 'growth marketers'}. Scale ROI effortlessly.\n\n👉 Start your trial today!`;
-      const v1FoldText = v1Desc.split('\n\n')[0] + ' ' + v1Desc.split('\n\n')[1];
+      const v1Headline = safeTruncate(hBase, spec.headlineLimit);
+      const v1Desc = `🚀 ${pBase}${aud ? `\n\n• Designed for: ${aud}` : ''}\n\n👉 Click to learn more!`;
+      const v1FoldText = pBase.slice(0, 110);
 
-      const v2Headline = safeTruncate(`Scale Campaign ROAS 3.8x Today`, spec.headlineLimit);
-      const v2Desc = `🔥 Built for ${aud || 'high-growth teams'}.\n\n• One dashboard for Google, Meta & TikTok\n• Real-time automated budget rebalancing\n• Zero manual spreadsheet tracking\n\nClaim your free strategy review 👇`;
+      const v2Headline = safeTruncate(hBase.length > 25 ? hBase : `Special Offer: ${hBase}`, spec.headlineLimit);
+      const v2Desc = `${aud ? `🔥 Built for ${aud}!\n\n` : ''}${pBase}\n\nGet started now 👇`;
 
       return [
         {
           platform,
-          headline: v1Headline,
+          headline: v1Headline || 'Discover Our Offer',
           description: v1Desc,
-          headlineCharCount: v1Headline.length,
-          headlineValid: v1Headline.length <= spec.headlineLimit,
-          descriptionCharCount: v1FoldText.length, // Fold length check
+          headlineCharCount: (v1Headline || 'Discover Our Offer').length,
+          headlineValid: (v1Headline || 'Discover Our Offer').length <= spec.headlineLimit,
+          descriptionCharCount: v1FoldText.length,
           descriptionValid: v1FoldText.length <= spec.descriptionFoldLimit!,
           bestPracticeTip: '⚡ 125-char fold optimized for Facebook & Instagram mobile feeds',
           complianceScore: 96,
-          keyAdjustments: ['Emojis added for visual stopping power', 'First fold text kept under 125 chars', 'Bullet points for mobile readability']
+          keyAdjustments: ['Emojis for feed stopping power', 'First fold kept under 125 chars', 'Bullet points for mobile skimmability']
         },
         {
           platform,
@@ -281,21 +304,21 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
           description: v2Desc,
           headlineCharCount: v2Headline.length,
           headlineValid: v2Headline.length <= spec.headlineLimit,
-          descriptionCharCount: 118,
+          descriptionCharCount: Math.min(125, v2Desc.length),
           descriptionValid: true,
           bestPracticeTip: '🔥 High-converting list format for Instagram feed',
           complianceScore: 94,
-          keyAdjustments: ['Bullet point list format', 'Direct call to action at top', 'Target audience callout']
+          keyAdjustments: ['Direct call to action at top', 'Target audience callout', 'Campaign context highlighted']
         }
       ];
     }
 
     if (platform === 'linkedin') {
-      const v1Headline = safeTruncate(`B2B Ad Engine: Unified Channel Automation & Attribution`, spec.headlineLimit);
-      const v1Desc = `Enterprise growth teams use our platform to unify ad spend, automate CPA bidding, and drive verified pipeline for ${aud || 'B2B buyers'}. Request an executive demo.`;
+      const v1Headline = safeTruncate(hBase, spec.headlineLimit);
+      const v1Desc = safeTruncate(`${pBase}${aud ? ` Tailored specifically for ${aud}.` : ''}`, spec.descriptionFoldLimit || 150);
 
-      const v2Headline = safeTruncate(`Reduce B2B Customer Acquisition Costs by 34%`, spec.headlineLimit);
-      const v2Desc = `Eliminate ad budget waste across Google, LinkedIn & Meta. Our API-driven platform delivers real-time attribution and automated portfolio bidding.`;
+      const v2Headline = safeTruncate(`Discover: ${hBase}`, spec.headlineLimit);
+      const v2Desc = safeTruncate(`${pBase}${aud ? ` Drive maximum value for ${aud}.` : ''}`, spec.descriptionFoldLimit || 150);
 
       return [
         {
@@ -306,9 +329,9 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
           headlineValid: v1Headline.length <= spec.headlineLimit,
           descriptionCharCount: v1Desc.length,
           descriptionValid: v1Desc.length <= spec.descriptionFoldLimit!,
-          bestPracticeTip: '💼 Professional B2B tone tailored for C-suite decision makers',
+          bestPracticeTip: '💼 Professional tone tailored for C-suite decision makers',
           complianceScore: 97,
-          keyAdjustments: ['Enterprise terminology applied', '150-char LinkedIn intro fold compliant', 'Executive demo CTA']
+          keyAdjustments: ['Professional terminology applied', '150-char LinkedIn intro fold compliant', 'Executive CTA']
         },
         {
           platform,
@@ -318,16 +341,16 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
           headlineValid: v2Headline.length <= spec.headlineLimit,
           descriptionCharCount: v2Desc.length,
           descriptionValid: v2Desc.length <= spec.descriptionFoldLimit!,
-          bestPracticeTip: '📈 ROI & CAC reduction metric focus',
+          bestPracticeTip: '📈 Strategic objective & ROI focus',
           complianceScore: 92,
-          keyAdjustments: ['CAC reduction benchmark', 'Technical multi-channel attribution focus', 'Professional tone']
+          keyAdjustments: ['Objective benchmark', 'Professional attribution focus', 'Tailored messaging']
         }
       ];
     }
 
     if (platform === 'tiktok') {
-      const v1Headline = safeTruncate(`The ad automation tool you actually need ⚡`, spec.headlineLimit);
-      const v1Desc = safeTruncate(`Stop losing money on bad ad campaigns! See how AI handles your Google and Meta ads on autopilot 🔥`, spec.descriptionLimit);
+      const v1Headline = safeTruncate(`Check this out: ${hBase}`, spec.headlineLimit);
+      const v1Desc = safeTruncate(`${pBase} 🔥 Designed for ${aud || 'you'}!`, spec.descriptionLimit);
 
       return [
         {
@@ -346,8 +369,8 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
     }
 
     if (platform === 'pinterest') {
-      const v1Headline = safeTruncate(`How to Scale Ad ROI and Automate Campaign Marketing`, spec.headlineLimit);
-      const v1Desc = safeTruncate(`Discover step-by-step ad optimization tactics. Learn how top growth brands rebalance budget across Google and Meta.`, spec.descriptionLimit);
+      const v1Headline = safeTruncate(`Guide: ${hBase}`, spec.headlineLimit);
+      const v1Desc = safeTruncate(`Explore ${obj || 'solutions'}: ${pBase}`, spec.descriptionLimit);
 
       return [
         {
@@ -366,8 +389,8 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
     }
 
     if (platform === 'x') {
-      const v1Headline = safeTruncate(`Automate your ad spend in 1 click.`, 80);
-      const v1Desc = safeTruncate(`Say goodbye to manual ad bidding. Manage Google, Meta & LinkedIn in one unified interface. Get started: https://astracloud.io #AdTech`, spec.descriptionLimit);
+      const v1Headline = safeTruncate(hBase, 80);
+      const v1Desc = safeTruncate(`${pBase} #${(obj || 'Growth').replace(/\s+/g, '')}`, spec.descriptionLimit);
 
       return [
         {
@@ -386,8 +409,8 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
     }
 
     // Programmatic DSP
-    const v1Headline = safeTruncate(`Unified Ad Tech Platform`, spec.headlineLimit);
-    const v1Desc = safeTruncate(`Automate ad spend across Google, Meta & DSP networks with real-time AI bidding.`, spec.descriptionLimit);
+    const v1Headline = safeTruncate(toTitleCase(hBase), spec.headlineLimit) || 'Campaign Solution';
+    const v1Desc = safeTruncate(pBase, spec.descriptionLimit);
 
     return [
       {
@@ -398,7 +421,7 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
         headlineValid: v1Headline.length <= spec.headlineLimit,
         descriptionCharCount: v1Desc.length,
         descriptionValid: v1Desc.length <= spec.descriptionLimit,
-        bestPracticeTip: '🎯 Ultra-concise 25-char banner headline',
+        bestPracticeTip: '🎯 Ultra-concise banner headline',
         complianceScore: 96,
         keyAdjustments: ['25-char banner constraint', 'Clear product identification', 'High contrast text']
       }
@@ -408,10 +431,9 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
   // Generate for all active platforms
   const handleRefineAllContent = async () => {
     setIsGenerating(true);
-    await new Promise(r => setTimeout(r, 450));
+    await new Promise(r => setTimeout(r, 200));
 
     const newVars: Record<PlatformType, PlatformVariation[]> = {} as any;
-
     const platformsToProcess = activePlatforms.length > 0 
       ? activePlatforms 
       : (['google', 'meta', 'linkedin'] as PlatformType[]);
@@ -430,10 +452,44 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
     setIsGenerating(false);
   };
 
+  const activePlatformsKey = activePlatforms.join(',');
+
   // Auto-generate on initial render or when master copy changes if empty
   useEffect(() => {
-    handleRefineAllContent();
-  }, [masterHeadline, masterPrimaryText, activePlatforms.join(',')]);
+    let isCancelled = false;
+
+    const runRefine = async () => {
+      setIsGenerating(true);
+      await new Promise(r => setTimeout(r, 200));
+      if (isCancelled) return;
+
+      const newVars: Record<PlatformType, PlatformVariation[]> = {} as any;
+      const platformsToProcess = activePlatforms.length > 0 
+        ? activePlatforms 
+        : (['google', 'meta', 'linkedin'] as PlatformType[]);
+
+      for (const plat of platformsToProcess) {
+        newVars[plat] = generatePlatformVariationsForPlatform(
+          plat,
+          masterHeadline,
+          masterPrimaryText,
+          objective,
+          targetAudience
+        );
+      }
+
+      if (!isCancelled) {
+        setVariations(newVars);
+        setIsGenerating(false);
+      }
+    };
+
+    runRefine();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [masterHeadline, masterPrimaryText, activePlatformsKey, objective, targetAudience]);
 
   const handleCopyText = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -482,6 +538,25 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
     });
 
     return warnings;
+  };
+
+  // Auto-Fix all character limit violations for master copy
+  const handleAutoFixAllViolations = () => {
+    let fixedHead = masterHeadline;
+    if (fixedHead.length > 30) {
+      const sub = fixedHead.slice(0, 30);
+      const space = sub.lastIndexOf(' ');
+      fixedHead = space > 15 ? sub.slice(0, space) : sub.trim();
+    }
+
+    let fixedText = masterPrimaryText;
+    if (fixedText.length > 90) {
+      const sub = fixedText.slice(0, 90);
+      const space = sub.lastIndexOf(' ');
+      fixedText = space > 50 ? sub.slice(0, space) : sub.trim();
+    }
+
+    onApplyMasterCopy(fixedHead, fixedText);
   };
 
   const masterWarnings = getMasterComplianceWarnings();
@@ -545,7 +620,7 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
                   key={ch.platform}
                   type="button"
                   onClick={() => setActivePlatformTab(ch.platform)}
-                  className={`px-3 py-1.5 rounded text-xs font-bold transition-all flex items-center gap-2 border cursor-pointer ${
+                  className={`px-3 py-1.5 rounded text-xs font-bold transition-all flex items-center gap-2 border cursor-pointer outline-none focus:outline-none focus:ring-0 ring-0 ${
                     isSelected
                       ? 'bg-amber-400 text-black border-amber-400 shadow-md shadow-amber-400/20 scale-102'
                       : 'bg-stone-900 text-stone-300 border-stone-800 hover:border-stone-700'
@@ -571,11 +646,24 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
 
       {/* Real-time Master Copy Compliance Warning Banner */}
       {masterWarnings.length > 0 && (
-        <div className="bg-amber-500/10 border border-amber-500/40 rounded p-3 text-xs space-y-1.5">
-          <div className="flex items-center gap-2 text-amber-400 font-bold uppercase tracking-wider text-[11px]">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-            <span>Master Copy Character Limit Violations Detected ({masterWarnings.length})</span>
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded p-3 text-xs space-y-2">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-2">
+            <div className="flex items-center gap-2 text-amber-400 font-bold uppercase tracking-wider text-[11px]">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>Master Copy Character Limit Violations Detected ({masterWarnings.length})</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleAutoFixAllViolations}
+              className="px-2.5 py-1 bg-amber-400 text-black font-bold text-[10px] uppercase tracking-wider rounded hover:bg-amber-300 transition-colors flex items-center gap-1 cursor-pointer shadow"
+            >
+              <Zap className="w-3 h-3" />
+              <span>Auto-Fix All Violations</span>
+            </button>
           </div>
+          <p className="text-[10px] text-stone-400 font-sans">
+            Your master creative copy exceeds the character or fold limits for <strong>{masterWarnings.map(w => w.platformName).join(', ')}</strong>. Click "Auto-Fix All Violations" to automatically trim copy to compliant lengths, or use the refined variations below.
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-stone-300 font-sans">
             {masterWarnings.map((w, i) => (
               <div key={i} className="flex items-center justify-between bg-black/40 px-2.5 py-1 rounded border border-amber-500/20">

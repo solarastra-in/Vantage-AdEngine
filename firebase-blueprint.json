@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "Campaign": {
+      "title": "Campaign",
+      "description": "Omnichannel advertising campaign configuration and performance metrics",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique campaign identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Campaign name"
+        },
+        "objective": {
+          "type": "string",
+          "description": "Marketing goal/objective"
+        },
+        "status": {
+          "type": "string",
+          "description": "Campaign status"
+        },
+        "totalBudget": {
+          "type": "number",
+          "description": "Total allocated budget across channels"
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date in ISO or YYYY-MM-DD format"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date in ISO or YYYY-MM-DD format"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "totalBudget"
+      ]
+    },
+    "WizardDraft": {
+      "title": "WizardDraft",
+      "description": "Auto-saved draft state for each step of the Omnichannel Campaign & Multi-Aspect Asset Wizard",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Draft ID"
+        },
+        "step": {
+          "type": "number",
+          "description": "Current wizard step (1, 2, 3, or 4)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of when the step was auto-saved"
+        },
+        "lastSavedStepName": {
+          "type": "string",
+          "description": "Human-readable step title"
+        },
+        "stepData": {
+          "type": "object",
+          "description": "Serialized wizard step form values and asset configs"
+        }
+      },
+      "required": [
+        "id",
+        "step",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/organizations/{orgId}/campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "Multi-channel advertising campaigns per organization"
+    },
+    "/organizations/{orgId}/wizardDrafts/{draftId}": {
+      "schema": "WizardDraft",
+      "description": "Auto-saved wizard drafts per step per organization"
+    }
+  }
+}

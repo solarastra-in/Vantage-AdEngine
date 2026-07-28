@@ -22,6 +22,8 @@ interface FinancialLedgerProps {
   onSelectInvoice: (invoice: Invoice) => void;
   onPayInvoice: (invoiceId: string) => void;
   onAddAuditLogEntry?: (invoiceId: string, entry: Omit<InvoiceAuditLogEntry, 'id'>) => void;
+  currency?: string;
+  locale?: string;
 }
 
 export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
@@ -29,7 +31,16 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
   onSelectInvoice,
   onPayInvoice,
   onAddAuditLogEntry,
+  currency = 'USD',
+  locale = 'en-US',
 }) => {
+  const formatCurrency = (val: number) => {
+    try {
+      return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(val);
+    } catch {
+      return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+  };
   const [filter, setFilter] = useState<'all' | 'PAID' | 'PENDING'>('all');
   const [auditInvoiceId, setAuditInvoiceId] = useState<string | null>(null);
 
@@ -128,11 +139,11 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
             <div className="text-[10px] uppercase text-stone-500 font-bold tracking-wider">Settlement Ratio</div>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span className="text-stone-300">Paid: <strong className="text-emerald-400">${totalPaid.toLocaleString()}</strong> ({paidCount})</span>
+              <span className="text-stone-300">Paid: <strong className="text-emerald-400">{formatCurrency(totalPaid)}</strong> ({paidCount})</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-              <span className="text-stone-300">Pending: <strong className="text-amber-400">${totalPending.toLocaleString()}</strong> ({pendingCount})</span>
+              <span className="text-stone-300">Pending: <strong className="text-amber-400">{formatCurrency(totalPending)}</strong> ({pendingCount})</span>
             </div>
           </div>
         </div>
@@ -142,13 +153,13 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div className="bg-[#0d0d0d] border border-stone-800 p-5 rounded-sm shadow-xl space-y-1">
           <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block">Total Billing Raised</span>
-          <div className="text-2xl font-serif text-white">${totalInvoiced.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+          <div className="text-2xl font-serif text-white">{formatCurrency(totalInvoiced)}</div>
           <span className="text-[11px] text-stone-400 font-mono">Platform gross media + fees</span>
         </div>
 
         <div className="bg-[#0d0d0d] border border-stone-800 p-5 rounded-sm shadow-xl space-y-1">
           <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block">Collected & Paid</span>
-          <div className="text-2xl font-serif text-emerald-400">${totalPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+          <div className="text-2xl font-serif text-emerald-400">{formatCurrency(totalPaid)}</div>
           <span className="text-[11px] text-emerald-500 font-mono flex items-center gap-1">
             <CheckCircle2 className="w-3 h-3" />
             <span>100% Channel Cleared</span>
@@ -157,7 +168,7 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
 
         <div className="bg-[#0d0d0d] border border-stone-800 p-5 rounded-sm shadow-xl space-y-1">
           <span className="text-[10px] uppercase tracking-wider text-stone-500 font-bold block">Pending Settlement</span>
-          <div className="text-2xl font-serif text-amber-400">${totalPending.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+          <div className="text-2xl font-serif text-amber-400">{formatCurrency(totalPending)}</div>
           <span className="text-[11px] text-amber-400/80 font-mono">Net 15 terms active</span>
         </div>
       </div>
@@ -226,7 +237,7 @@ export const FinancialLedger: React.FC<FinancialLedgerProps> = ({
                   </td>
                   <td className="py-3.5 px-4 text-stone-400">{inv.dueDate}</td>
                   <td className="py-3.5 px-4 text-right text-stone-200 font-bold">
-                    ${inv.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    {formatCurrency(inv.amount)}
                   </td>
                   <td className="py-3.5 px-4 text-right space-x-1.5">
                     <button

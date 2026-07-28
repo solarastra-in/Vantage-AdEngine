@@ -40,6 +40,8 @@ interface CommandCenterProps {
   onOpenWizard: () => void;
   onNavigateTab: (tab: 'campaigns' | 'analytics' | 'api-nexus' | 'financials') => void;
   onSelectCampaign: (campaign: Campaign) => void;
+  currency?: string;
+  locale?: string;
 }
 
 export const CommandCenter: React.FC<CommandCenterProps> = ({
@@ -50,8 +52,18 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   onOpenWizard,
   onNavigateTab,
   onSelectCampaign,
+  currency = 'USD',
+  locale = 'en-US',
 }) => {
   const [chartMetric, setChartMetric] = useState<'spendVsReturn' | 'channelDistribution'>('spendVsReturn');
+
+  const formatCurrency = (val: number) => {
+    try {
+      return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(val);
+    } catch {
+      return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+  };
 
   const activeCampaigns = campaigns.filter(c => c.status === 'active');
   const primaryCampaign = campaigns[0] || null;
@@ -122,7 +134,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             <DollarSign className="w-4 h-4 text-stone-400" />
           </div>
           <div className="text-2xl sm:text-3xl font-serif text-white tracking-tight italic">
-            ${totalSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatCurrency(totalSpend)}
           </div>
           <div className="mt-2 text-[11px] text-stone-400 font-mono">
             Across {channels.length} connected channels
@@ -191,7 +203,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         Global Budget
                       </label>
                       <div className="text-xl font-serif text-white">
-                        ${primaryCampaign.totalBudget.toLocaleString()}
+                        {formatCurrency(primaryCampaign.totalBudget)}
                       </div>
                     </div>
                     <div>
@@ -216,7 +228,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                             <span className="w-2 h-2 rounded-full bg-amber-400" />
                             <span className="text-xs text-stone-300 font-medium">{ch.platformName}</span>
                           </div>
-                          <span className="text-xs font-mono text-stone-400">${ch.budget.toLocaleString()}</span>
+                          <span className="text-xs font-mono text-stone-400">{formatCurrency(ch.budget)}</span>
                         </div>
                       ))}
                     </div>
@@ -269,7 +281,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                       }`}>
                         {inv.status}
                       </div>
-                      <div className="font-mono text-stone-300 font-medium mt-0.5">${inv.amount.toLocaleString()}</div>
+                      <div className="font-mono text-stone-300 font-medium mt-0.5">{formatCurrency(inv.amount)}</div>
                     </div>
                   </div>
                 ))}

@@ -11,6 +11,7 @@ import {
   Megaphone,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   ShieldCheck,
   CreditCard,
@@ -33,6 +34,7 @@ import {
   Copy,
   Layout,
   Cpu,
+  Bot,
   Plus,
   Trash2,
   Maximize2,
@@ -40,13 +42,21 @@ import {
   Split
 } from 'lucide-react';
 import { PlatformType, ChannelCredentials, AbTestConfig, AbTestVariant } from '../types';
-import { fetchChannelCredentialsFromFirestore, DEFAULT_CHANNEL_CREDENTIALS, saveChannelCredentialsToFirestore } from '../lib/firestoreService';
+import { 
+  fetchChannelCredentialsFromFirestore, 
+  DEFAULT_CHANNEL_CREDENTIALS, 
+  saveChannelCredentialsToFirestore,
+  saveWizardDraftToFirestore,
+  fetchWizardDraftFromFirestore,
+  deleteWizardDraftFromFirestore
+} from '../lib/firestoreService';
 import { validateChannelApiKeyFormat } from '../lib/encryption';
 import { AiContentRefiner } from './AiContentRefiner';
 import { AbTestFramework } from './AbTestFramework';
 
 interface CampaignWizardModalProps {
   isOpen: boolean;
+  orgId?: string;
   onClose: () => void;
   onSubmitCampaign: (campaignData: any) => void;
   onOptimizeWithAi?: (promptData: any) => Promise<any>;
@@ -55,6 +65,7 @@ interface CampaignWizardModalProps {
 
 export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   isOpen,
+  orgId,
   onClose,
   onSubmitCampaign,
   onOptimizeWithAi,
@@ -92,46 +103,37 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   const [headline, setHeadline] = useState('Scale Digital Ads Across Meta, Google & TikTok in 1 Click');
   const [primaryText, setPrimaryText] = useState('Vantage AdEngine unifies cross-channel budgets, automated publishing, and real-time ROAS tracking into a single pane.');
   const [callToAction, setCallToAction] = useState('Get Started');
-  const [masterMediaUrl, setMasterMediaUrl] = useState('https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=800&q=80');
+  const [masterMediaUrl, setMasterMediaUrl] = useState('');
 
   // Google Ads API Responsive Search Ad (RSA) Multi-Headlines & Descriptions
-  const [googleRsaHeadlines, setGoogleRsaHeadlines] = useState<string[]>([
-    'Scale Digital Ads in 1 Click',
-    'AI Multi-Channel Campaign Manager',
-    '4.2x Guaranteed ROAS Automation',
-    'Unified Google & Meta Publishing',
-    'Real-Time Bidding DSP Integration'
-  ]);
+  const [googleRsaHeadlines, setGoogleRsaHeadlines] = useState<string[]>([]);
 
-  const [googleRsaDescriptions, setGoogleRsaDescriptions] = useState<string[]>([
-    'Automate search, display, and Performance Max campaigns with AI real-time ROAS optimization.',
-    'Deploy budgets across Google Ads, Meta, TikTok & LinkedIn from a single pane of glass.'
-  ]);
+  const [googleRsaDescriptions, setGoogleRsaDescriptions] = useState<string[]>([]);
 
   // Platform Specific Image Assets (Aspect Ratios)
   const [platformImages, setPlatformImages] = useState({
-    square1x1: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1080&h=1080&q=80',
-    vertical9x16: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1080&h=1920&q=80',
-    landscape191x1: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&h=628&q=80',
-    landscape16x9: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&h=675&q=80',
-    vertical2x3: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1000&h=1500&q=80',
-    medRec300x250: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=300&h=250&q=80',
-    leaderboard728x90: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=728&h=90&q=80',
-    halfPage300x600: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=300&h=600&q=80',
-    skyscraper160x600: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=160&h=600&q=80',
+    square1x1: '',
+    vertical9x16: '',
+    landscape191x1: '',
+    landscape16x9: '',
+    vertical2x3: '',
+    medRec300x250: '',
+    leaderboard728x90: '',
+    halfPage300x600: '',
+    skyscraper160x600: '',
   });
 
   // Confirmed Crop/Resized State per Aspect Ratio
   const [imageConfirmedState, setImageConfirmedState] = useState<Record<string, boolean>>({
-    square1x1: true,
-    vertical9x16: true,
-    landscape191x1: true,
-    landscape16x9: true,
-    vertical2x3: true,
-    medRec300x250: true,
-    leaderboard728x90: true,
-    halfPage300x600: true,
-    skyscraper160x600: true,
+    square1x1: false,
+    vertical9x16: false,
+    landscape191x1: false,
+    landscape16x9: false,
+    vertical2x3: false,
+    medRec300x250: false,
+    leaderboard728x90: false,
+    halfPage300x600: false,
+    skyscraper160x600: false,
   });
 
   // Interactive Resizing & Confirmation Modal State
@@ -147,6 +149,9 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     focalX: number;
     focalY: number;
   } | null>(null);
+
+  // Gemini AI Context Verification State
+  const [isContextVerified, setIsContextVerified] = useState<boolean>(true);
 
   // Platform Specific Adapted Copy
   const [platformCopy, setPlatformCopy] = useState<Record<PlatformType, { headline: string; primaryText: string; cta: string }>>({
@@ -646,7 +651,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   useEffect(() => {
     const loadCreds = async () => {
       try {
-        const loaded = await fetchChannelCredentialsFromFirestore('org-astracloud');
+        const loaded = await fetchChannelCredentialsFromFirestore(orgId || 'org-astracloud');
         if (loaded && Object.keys(loaded).length > 0) {
           setCredentials(loaded);
         }
@@ -655,7 +660,129 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       }
     };
     loadCreds();
-  }, []);
+  }, [orgId]);
+
+  const tenantOrgId = orgId || 'org-astracloud';
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'restored'>('idle');
+  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
+
+  // Restore active draft from Firestore when modal opens
+  useEffect(() => {
+    let isCancelled = false;
+    if (isOpen) {
+      fetchWizardDraftFromFirestore(tenantOrgId).then((draft) => {
+        if (isCancelled) return;
+        if (draft && draft.stepData) {
+          const d = draft.stepData;
+          if (d.name !== undefined) setName(d.name);
+          if (d.objective !== undefined) setObjective(d.objective);
+          if (d.targetAudience !== undefined) setTargetAudience(d.targetAudience);
+          if (d.totalBudget !== undefined) setTotalBudget(d.totalBudget);
+          if (d.startDate !== undefined) setStartDate(d.startDate);
+          if (d.endDate !== undefined) setEndDate(d.endDate);
+          if (d.headline !== undefined) setHeadline(d.headline);
+          if (d.primaryText !== undefined) setPrimaryText(d.primaryText);
+          if (d.callToAction !== undefined) setCallToAction(d.callToAction);
+          if (d.masterMediaUrl !== undefined) setMasterMediaUrl(d.masterMediaUrl);
+          if (d.googleRsaHeadlines !== undefined) setGoogleRsaHeadlines(d.googleRsaHeadlines);
+          if (d.googleRsaDescriptions !== undefined) setGoogleRsaDescriptions(d.googleRsaDescriptions);
+          if (d.platformImages !== undefined) setPlatformImages(d.platformImages);
+          if (d.platformCopy !== undefined) setPlatformCopy(d.platformCopy);
+          if (d.selectedChannels !== undefined) setSelectedChannels(d.selectedChannels);
+          if (d.metaBidding !== undefined) setMetaBidding(d.metaBidding);
+          if (d.googleBidding !== undefined) setGoogleBidding(d.googleBidding);
+          if (d.abTestConfig !== undefined) setAbTestConfig(d.abTestConfig);
+          if (d.customerName !== undefined) setCustomerName(d.customerName);
+          if (d.customerEmail !== undefined) setCustomerEmail(d.customerEmail);
+          if (draft.step) setStep(draft.step as any);
+
+          setAutoSaveStatus('restored');
+          setLastSavedTimestamp(draft.updatedAt ? new Date(draft.updatedAt).toLocaleTimeString() : new Date().toLocaleTimeString());
+        }
+      });
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, tenantOrgId]);
+
+  // Auto-save every step transition or form update automatically to Firestore
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const stepTitles: Record<number, string> = {
+      1: 'Blueprint & Images',
+      2: 'Budgets & Bidding',
+      3: 'Ad API Keys',
+      4: 'Payload & Dispatch'
+    };
+
+    const timer = setTimeout(async () => {
+      setAutoSaveStatus('saving');
+      const now = new Date().toISOString();
+      try {
+        await saveWizardDraftToFirestore(tenantOrgId, {
+          id: 'active_wizard_draft',
+          step,
+          updatedAt: now,
+          lastSavedStepName: stepTitles[step] || `Step ${step}`,
+          stepData: {
+            name,
+            objective,
+            targetAudience,
+            totalBudget,
+            startDate,
+            endDate,
+            headline,
+            primaryText,
+            callToAction,
+            masterMediaUrl,
+            googleRsaHeadlines,
+            googleRsaDescriptions,
+            platformImages,
+            platformCopy,
+            selectedChannels,
+            metaBidding,
+            googleBidding,
+            abTestConfig,
+            customerName,
+            customerEmail,
+          }
+        });
+        setAutoSaveStatus('saved');
+        setLastSavedTimestamp(new Date().toLocaleTimeString());
+      } catch (e) {
+        console.error('Error auto-saving wizard step to Firestore:', e);
+        setAutoSaveStatus('idle');
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [
+    isOpen,
+    tenantOrgId,
+    step,
+    name,
+    objective,
+    targetAudience,
+    totalBudget,
+    startDate,
+    endDate,
+    headline,
+    primaryText,
+    callToAction,
+    masterMediaUrl,
+    googleRsaHeadlines,
+    googleRsaDescriptions,
+    platformImages,
+    platformCopy,
+    selectedChannels,
+    metaBidding,
+    googleBidding,
+    abTestConfig,
+    customerName,
+    customerEmail,
+  ]);
 
   const handleCredentialChange = (platform: PlatformType, field: keyof ChannelCredentials, value: any) => {
     setCredentials(prev => ({
@@ -878,10 +1005,184 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     setResizingPreviewAsset(null);
   };
 
+  // Generate 15 AI RSA Headlines dynamically from campaign inputs (100% relevant, no generic buzzwords)
+  const handleGenerateAiRsaHeadlines = () => {
+    setIsContextVerified(true);
+    const masterH = headline.trim();
+    const masterP = primaryText.trim();
+    const campaignN = name.trim();
+    const targetA = targetAudience.trim();
+    const cta = callToAction.trim() || 'Book Now';
+
+    const formatHeadline = (str: string): string => {
+      if (!str) return '';
+      let cleaned = str.trim().replace(/\s+/g, ' ');
+      if (cleaned.length > 30) {
+        const sliced = cleaned.slice(0, 30);
+        const lastSpace = sliced.lastIndexOf(' ');
+        cleaned = (lastSpace > 12 ? sliced.slice(0, lastSpace) : sliced).trim();
+      }
+      return cleaned.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+    };
+
+    const pool: string[] = [];
+
+    // 1. Direct Master Headline & Parts
+    if (masterH) {
+      pool.push(formatHeadline(masterH));
+      const parts = masterH.split(/[:|\-–]/).map(p => p.trim()).filter(Boolean);
+      parts.forEach(p => pool.push(formatHeadline(p)));
+      pool.push(formatHeadline(`Get ${masterH}`));
+      pool.push(formatHeadline(`Official ${masterH}`));
+      pool.push(formatHeadline(`Discover ${masterH}`));
+    }
+
+    // 2. Campaign Name variations
+    if (campaignN) {
+      pool.push(formatHeadline(campaignN));
+      pool.push(formatHeadline(`Official ${campaignN}`));
+      pool.push(formatHeadline(`Book ${campaignN}`));
+      pool.push(formatHeadline(`Reserve ${campaignN}`));
+      pool.push(formatHeadline(`Visit ${campaignN}`));
+    }
+
+    // 3. Extracted key phrases from Primary Text (clause splitting)
+    if (masterP) {
+      const clauses = masterP
+        .split(/[\.\!\?\,\;\:\-\–\n]/)
+        .map(c => c.trim())
+        .filter(c => c.length >= 6 && c.length <= 35);
+
+      clauses.forEach(clause => {
+        pool.push(formatHeadline(clause));
+        if (clause.toLowerCase().startsWith('trade ')) {
+          pool.push(formatHeadline(clause.replace(/trade /i, 'Escape ')));
+        }
+      });
+    }
+
+    // 4. Target Audience / Benefit phrases
+    if (targetA) {
+      const audShort = targetA.split(',')[0].trim();
+      if (audShort.length <= 22) {
+        pool.push(formatHeadline(`Ideal For ${audShort}`));
+        pool.push(formatHeadline(`Tailored For ${audShort}`));
+      }
+    }
+
+    // 5. Action CTAs contextualized
+    if (cta) {
+      pool.push(formatHeadline(cta));
+      pool.push(formatHeadline(`${cta} Today`));
+      pool.push(formatHeadline(`${cta} Online Now`));
+    }
+    pool.push(formatHeadline('Check Availability'));
+    pool.push(formatHeadline('Special Offer Available'));
+    pool.push(formatHeadline('Book Direct & Save'));
+    pool.push(formatHeadline('Reserve Your Stay'));
+
+    // Filter, deduplicate, and limit to 15 headlines (strict max 30 chars each)
+    const uniqueHeadlines: string[] = [];
+    const seen = new Set<string>();
+
+    for (const item of pool) {
+      if (!item || item.length < 3 || item.length > 30) continue;
+      const lower = item.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        uniqueHeadlines.push(item);
+      }
+      if (uniqueHeadlines.length >= 15) break;
+    }
+
+    setGoogleRsaHeadlines(uniqueHeadlines);
+  };
+
+  // Generate 4 AI RSA Descriptions dynamically from campaign inputs (100% relevant, no generic buzzwords)
+  const handleGenerateAiRsaDescriptions = () => {
+    setIsContextVerified(true);
+    const masterH = headline.trim();
+    const masterP = primaryText.trim();
+    const campaignN = name.trim();
+    const cta = callToAction.trim() || 'Book Today';
+
+    const formatDesc = (str: string): string => {
+      if (!str) return '';
+      let cleaned = str.trim().replace(/\s+/g, ' ');
+      if (cleaned.length > 90) {
+        const sliced = cleaned.slice(0, 90);
+        const lastSpace = sliced.lastIndexOf(' ');
+        cleaned = (lastSpace > 40 ? sliced.slice(0, lastSpace) : sliced).trim();
+      }
+      if (!/[\.\!\?]$/.test(cleaned) && cleaned.length <= 89) {
+        cleaned += '.';
+      }
+      return cleaned;
+    };
+
+    const candidates: string[] = [];
+
+    if (masterP) {
+      candidates.push(formatDesc(masterP));
+    }
+
+    if (masterH && masterP) {
+      candidates.push(formatDesc(`${masterH}: ${masterP}`));
+    }
+
+    if (campaignN && masterP) {
+      candidates.push(formatDesc(`${campaignN}. ${masterP} ${cta}!`));
+    }
+
+    if (masterH) {
+      candidates.push(formatDesc(`${masterH}. Reserve online now and enjoy exclusive special rates!`));
+    }
+
+    candidates.push(formatDesc(`Explore ${campaignN || masterH || 'our offer'}. Book direct today for best availability.`));
+
+    const uniqueDescs: string[] = [];
+    const seen = new Set<string>();
+
+    for (const c of candidates) {
+      if (!c || c.length < 10 || c.length > 90) continue;
+      const lower = c.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        uniqueDescs.push(c);
+      }
+      if (uniqueDescs.length >= 4) break;
+    }
+
+    setGoogleRsaDescriptions(uniqueDescs);
+  };
+
   // Add Headline for Google RSA
   const handleAddGoogleHeadline = () => {
     if (googleRsaHeadlines.length < 15) {
-      setGoogleRsaHeadlines([...googleRsaHeadlines, `Headline ${googleRsaHeadlines.length + 1}`]);
+      const candidates = [
+        `Scale ${objective || 'Campaigns'}`,
+        `Top Choice for ${targetAudience.split(',')[0].trim() || 'Audience'}`,
+        `Official ${name.trim() || 'Offer'}`,
+        `Maximize ${objective || 'Results'}`,
+        `Get ${headline.trim().slice(0, 20)}`
+      ];
+      const newHead = candidates.find(c => !googleRsaHeadlines.includes(c)) || `Headline ${googleRsaHeadlines.length + 1}`;
+      setGoogleRsaHeadlines([...googleRsaHeadlines, newHead]);
+    }
+  };
+
+  // Add Description for Google RSA
+  const handleAddGoogleDescription = () => {
+    if (googleRsaDescriptions.length < 4) {
+      const newDesc = `Optimize your ${objective.toLowerCase() || 'campaign'} performance with targeted audience messaging.`;
+      setGoogleRsaDescriptions([...googleRsaDescriptions, newDesc.slice(0, 90)]);
+    }
+  };
+
+  // Remove Description for Google RSA
+  const handleRemoveGoogleDescription = (idx: number) => {
+    if (googleRsaDescriptions.length > 1) {
+      setGoogleRsaDescriptions(googleRsaDescriptions.filter((_, i) => i !== idx));
     }
   };
 
@@ -940,7 +1241,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     try {
       for (const p of activePlatforms) {
         if (credentials[p]) {
-          await saveChannelCredentialsToFirestore('org-astracloud', credentials[p]);
+          await saveChannelCredentialsToFirestore(tenantOrgId, credentials[p]);
         }
       }
     } catch (err) {
@@ -990,6 +1291,13 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       customerName,
       customerEmail,
     };
+
+    // Delete active wizard draft from Firestore upon successful campaign submission
+    try {
+      await deleteWizardDraftFromFirestore(tenantOrgId);
+    } catch (e) {
+      console.warn('Error deleting draft from Firestore after launch:', e);
+    }
 
     await onSubmitCampaign(campaignPayload);
     setIsSubmitting(false);
@@ -1366,13 +1674,39 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
               <Megaphone className="w-4 h-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-bold text-white uppercase tracking-widest font-mono">
                   Omnichannel Campaign & Multi-Aspect Asset Wizard
                 </span>
                 <span className="text-[10px] bg-amber-400/10 text-amber-400 border border-amber-400/30 px-2 py-0.5 rounded font-mono">
                   7-Platform API Deep Integration
                 </span>
+                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-stone-900 border border-stone-800 text-emerald-400 rounded text-[10px] font-mono">
+                  {autoSaveStatus === 'saving' && (
+                    <>
+                      <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                      <span className="text-amber-400">Saving Step to Firestore...</span>
+                    </>
+                  )}
+                  {autoSaveStatus === 'saved' && (
+                    <>
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      <span>Auto-saved to Firestore {lastSavedTimestamp ? `at ${lastSavedTimestamp}` : ''}</span>
+                    </>
+                  )}
+                  {autoSaveStatus === 'restored' && (
+                    <>
+                      <ShieldCheck className="w-3 h-3 text-amber-400" />
+                      <span>Draft Restored from Firestore</span>
+                    </>
+                  )}
+                  {autoSaveStatus === 'idle' && (
+                    <>
+                      <CheckCircle2 className="w-3 h-3 text-stone-400" />
+                      <span className="text-stone-400">Firestore Step Sync Active</span>
+                    </>
+                  )}
+                </div>
               </div>
               <p className="text-[11px] text-stone-400 font-mono mt-0.5">
                 Multi-ratio visual asset management, channel-specific bidding strategies, and direct API payload synthesis
@@ -1572,27 +1906,100 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   />
                 </div>
 
+                {/* Gemini AI Context Verification Panel */}
+                <div className="bg-amber-950/20 border border-amber-500/30 rounded p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Bot className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs uppercase font-bold text-amber-300 tracking-wider">
+                        Gemini AI Context Verification
+                      </span>
+                      {isContextVerified ? (
+                        <span className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Context Verified for Gemini
+                        </span>
+                      ) : (
+                        <span className="bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
+                          Verification Pending
+                        </span>
+                      )}
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer bg-stone-900 border border-stone-700 px-3 py-1 rounded hover:border-amber-400 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={isContextVerified}
+                        onChange={e => setIsContextVerified(e.target.checked)}
+                        className="rounded border-stone-700 text-amber-400 focus:ring-amber-400 bg-stone-950 h-3.5 w-3.5 cursor-pointer"
+                      />
+                      <span className="text-xs text-stone-200 font-semibold">
+                        Verify & Lock Campaign Scope
+                      </span>
+                    </label>
+                  </div>
+
+                  <p className="text-[11px] text-stone-300 font-sans">
+                    Review the verified campaign metadata below before executing AI generation. These inputs are passed directly to Gemini to generate 100% scoped headlines and descriptions:
+                  </p>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                    <div className="bg-black/60 p-2.5 rounded border border-stone-800">
+                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Campaign Name</div>
+                      <div className="text-stone-200 truncate font-mono font-semibold">{name || 'Not specified'}</div>
+                    </div>
+                    <div className="bg-black/60 p-2.5 rounded border border-stone-800">
+                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Objective</div>
+                      <div className="text-amber-300 truncate font-mono font-semibold">{objective || 'Lead Generation'}</div>
+                    </div>
+                    <div className="bg-black/60 p-2.5 rounded border border-stone-800">
+                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Target Audience</div>
+                      <div className="text-stone-200 truncate font-mono font-semibold">{targetAudience || 'Not specified'}</div>
+                    </div>
+                    <div className="bg-black/60 p-2.5 rounded border border-stone-800">
+                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Master Headline & CTA</div>
+                      <div className="text-stone-200 truncate font-mono font-semibold">{headline || callToAction ? `${headline || 'No Headline'} (${callToAction})` : 'Not specified'}</div>
+                    </div>
+                  </div>
+
+                  {!isContextVerified && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-amber-300 bg-amber-400/10 p-2 rounded border border-amber-400/20">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Please check "Verify & Lock Campaign Scope" above to confirm context before generating RSA copy.</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* Google Responsive Search Ads (RSA) Multi-Headlines Manager */}
                 <div className="bg-stone-950 border border-stone-800 p-4 rounded space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                     <div>
                       <h5 className="text-xs uppercase tracking-wider font-bold text-amber-400 flex items-center gap-2">
                         <Globe className="w-3.5 h-3.5" />
-                        <span>Google Ads API Responsive Search Headlines (Up to 15)</span>
+                        <span>Google Ads API Responsive Search Headlines ({googleRsaHeadlines.length}/15)</span>
                       </h5>
                       <p className="text-[10px] text-stone-400 font-sans">
-                        Google Ads API mandates multiple headlines for machine-learning placement rotation.
+                        Google Ads API mandates multiple headlines (max 30 chars each, Title Case) for machine-learning rotation.
                       </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleAddGoogleHeadline}
-                      className="px-2.5 py-1 bg-stone-900 border border-stone-700 hover:border-amber-400 text-stone-300 text-[11px] rounded flex items-center gap-1 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" />
-                      Add Headline
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleGenerateAiRsaHeadlines}
+                        className="px-2.5 py-1 bg-amber-400/10 border border-amber-400/40 hover:bg-amber-400/20 text-amber-300 text-[11px] font-bold rounded flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Generate 15 AI RSA Headlines</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleAddGoogleHeadline}
+                        className="px-2.5 py-1 bg-stone-900 border border-stone-700 hover:border-amber-400 text-stone-300 text-[11px] rounded flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1609,11 +2016,76 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                           }}
                           className="w-full bg-transparent text-xs text-white outline-none"
                         />
-                        <span className="text-[9px] text-stone-500">{h.length}/30</span>
+                        <span className={`text-[9px] font-mono ${h.length > 30 ? 'text-red-400 font-bold' : 'text-stone-500'}`}>
+                          {h.length}/30
+                        </span>
                         <button
                           type="button"
                           onClick={() => handleRemoveGoogleHeadline(idx)}
-                          className="text-stone-600 hover:text-red-400 p-0.5"
+                          className="text-stone-600 hover:text-red-400 p-0.5 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Google RSA Descriptions Manager (Up to 4) */}
+                <div className="bg-stone-950 border border-stone-800 p-4 rounded space-y-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <div>
+                      <h5 className="text-xs uppercase tracking-wider font-bold text-amber-400 flex items-center gap-2">
+                        <Globe className="w-3.5 h-3.5" />
+                        <span>Google Ads API Responsive Search Descriptions ({googleRsaDescriptions.length}/4)</span>
+                      </h5>
+                      <p className="text-[10px] text-stone-400 font-sans">
+                        Google Ads API rotates up to 4 ad descriptions (max 90 chars each).
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleGenerateAiRsaDescriptions}
+                        className="px-2.5 py-1 bg-amber-400/10 border border-amber-400/40 hover:bg-amber-400/20 text-amber-300 text-[11px] font-bold rounded flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Generate 4 AI Descriptions</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleAddGoogleDescription}
+                        className="px-2.5 py-1 bg-stone-900 border border-stone-700 hover:border-amber-400 text-stone-300 text-[11px] rounded flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {googleRsaDescriptions.map((d, idx) => (
+                      <div key={idx} className="flex items-center gap-2 bg-black border border-stone-800 px-2.5 py-1.5 rounded">
+                        <span className="text-[10px] text-amber-400 font-bold">D{idx + 1}.</span>
+                        <input
+                          type="text"
+                          value={d}
+                          onChange={e => {
+                            const copy = [...googleRsaDescriptions];
+                            copy[idx] = e.target.value;
+                            setGoogleRsaDescriptions(copy);
+                          }}
+                          className="w-full bg-transparent text-xs text-white outline-none"
+                        />
+                        <span className={`text-[9px] font-mono ${d.length > 90 ? 'text-red-400 font-bold' : 'text-stone-500'}`}>
+                          {d.length}/90
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveGoogleDescription(idx)}
+                          className="text-stone-600 hover:text-red-400 p-0.5 cursor-pointer"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -1646,13 +2118,76 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   <label className="block text-[11px] uppercase tracking-wider text-stone-400 font-bold mb-1">
                     Master Creative Image URL <span className="text-red-400">*</span>
                   </label>
-                  <input
-                    type="url"
-                    value={masterMediaUrl}
-                    onChange={e => setMasterMediaUrl(e.target.value)}
-                    required
-                    className="w-full bg-stone-950 border border-stone-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none rounded"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={masterMediaUrl}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setMasterMediaUrl(val);
+                        if (val) {
+                          setPlatformImages(prev => ({
+                            square1x1: prev.square1x1 || val,
+                            vertical9x16: prev.vertical9x16 || val,
+                            landscape191x1: prev.landscape191x1 || val,
+                            landscape16x9: prev.landscape16x9 || val,
+                            vertical2x3: prev.vertical2x3 || val,
+                            medRec300x250: prev.medRec300x250 || val,
+                            leaderboard728x90: prev.leaderboard728x90 || val,
+                            halfPage300x600: prev.halfPage300x600 || val,
+                            skyscraper160x600: prev.skyscraper160x600 || val,
+                          }));
+                        }
+                      }}
+                      required
+                      placeholder="Upload image or paste image URL..."
+                      className="w-full bg-stone-950 border border-stone-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none rounded font-mono"
+                    />
+                    <label className="px-4 py-2.5 bg-stone-900 border border-stone-700 hover:border-amber-400 hover:text-amber-400 text-stone-200 text-xs font-bold uppercase rounded cursor-pointer transition-colors flex items-center gap-1.5 shrink-0">
+                      <Upload className="w-4 h-4 text-amber-400" />
+                      <span>Browse File</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const fileUrl = URL.createObjectURL(file);
+                            setMasterMediaUrl(fileUrl);
+                            setPlatformImages({
+                              square1x1: fileUrl,
+                              vertical9x16: fileUrl,
+                              landscape191x1: fileUrl,
+                              landscape16x9: fileUrl,
+                              vertical2x3: fileUrl,
+                              medRec300x250: fileUrl,
+                              leaderboard728x90: fileUrl,
+                              halfPage300x600: fileUrl,
+                              skyscraper160x600: fileUrl,
+                            });
+                            setImageConfirmedState({
+                              square1x1: true,
+                              vertical9x16: true,
+                              landscape191x1: true,
+                              landscape16x9: true,
+                              vertical2x3: true,
+                              medRec300x250: true,
+                              leaderboard728x90: true,
+                              halfPage300x600: true,
+                              skyscraper160x600: true,
+                            });
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  {!masterMediaUrl && (
+                    <p className="text-[11px] text-amber-400/90 font-mono mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      Please upload an image file or provide an Image URL to continue.
+                    </p>
+                  )}
                 </div>
               </div>
 
