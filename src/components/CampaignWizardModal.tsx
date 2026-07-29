@@ -2577,6 +2577,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                 <div className="pt-2">
                   <AiContentRefiner
                     enabledChannels={selectedChannels}
+                    businessName={name}
                     masterHeadline={headline}
                     masterPrimaryText={primaryText}
                     objective={objective}
@@ -2584,6 +2585,12 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                     onApplyMasterCopy={(newHeadline, newText) => {
                       setHeadline(newHeadline);
                       setPrimaryText(newText);
+                    }}
+                    onApplyPlatformCopy={(plat, h, p) => {
+                      setPlatformCopy(prev => ({
+                        ...prev,
+                        [plat]: { ...prev[plat], headline: h, primaryText: p }
+                      }));
                     }}
                     onAddRsaHeadline={(newHeadline) => {
                       if (!googleRsaHeadlines.includes(newHeadline)) {

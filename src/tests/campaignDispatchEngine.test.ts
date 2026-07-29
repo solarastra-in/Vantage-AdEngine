@@ -51,6 +51,63 @@ describe('campaignDispatchEngine: real schema transform + validation', () => {
   });
 });
 
+describe('campaignDispatchEngine: platform-specific creative overrides', () => {
+  test('uses the platform override when one is present for this channel, not the master creative', () => {
+    const payload = transformForPlatform(
+      {
+        creative: { ...baseCreative, headline: 'Master headline nobody tailored' },
+        platformCreatives: {
+          google: { headline: 'Google-tailored headline', primaryText: 'Google-tailored body', callToAction: 'Shop Now' },
+        },
+      },
+      baseChannel
+    );
+    expect(payload.headline).toBe('Google-tailored headline');
+    expect(payload.primaryText).toBe('Google-tailored body');
+  });
+
+  test('falls back to the master creative for a platform with no override -- this is what makes the fallback safe, not silent data loss', () => {
+    const payload = transformForPlatform(
+      {
+        creative: { ...baseCreative, headline: 'Short headline' },
+        platformCreatives: {
+          meta: { headline: 'Meta-only override', primaryText: 'x', callToAction: 'x' },
+        },
+      },
+      baseChannel // channel is 'google', which has no override above
+    );
+    expect(payload.headline).toBe('Short headline');
+  });
+
+  test('an override still gets the same real per-platform truncation as the master creative would', () => {
+    const payload = transformForPlatform(
+      {
+        creative: baseCreative,
+        platformCreatives: {
+          google: { headline: 'This override headline is also way too long for Google Ads', primaryText: 'x', callToAction: 'x' },
+        },
+      },
+      baseChannel
+    );
+    expect(payload.headline.length).toBeLessThanOrEqual(30);
+    expect(payload.issues.some(i => i.field === 'headline' && i.severity === 'auto_corrected')).toBe(true);
+  });
+
+  test('an override missing its own mediaUrl falls back to the master mediaUrl rather than failing validation', () => {
+    const payload = transformForPlatform(
+      {
+        creative: baseCreative, // has a real mediaUrl
+        platformCreatives: {
+          google: { headline: 'Short', primaryText: 'Short body', callToAction: 'Go' }, // no mediaUrl
+        },
+      },
+      baseChannel
+    );
+    expect(hasBlockingErrors(payload)).toBe(false);
+    expect(payload.mediaUrl).toBe(baseCreative.mediaUrl);
+  });
+});
+
 describe('campaignDispatchEngine: saga-style dispatch with compensation', () => {
   function makeCampaign(channels: ChannelBudget[]): Campaign {
     return {

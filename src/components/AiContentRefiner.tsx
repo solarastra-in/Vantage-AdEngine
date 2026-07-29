@@ -19,11 +19,14 @@ import { ChannelBudget, PlatformType } from '../types';
 
 interface AiContentRefinerProps {
   enabledChannels: ChannelBudget[];
+  businessName: string;
   masterHeadline: string;
   masterPrimaryText: string;
   objective: string;
   targetAudience: string;
   onApplyMasterCopy: (headline: string, primaryText: string) => void;
+  /** Applies a generated variation as THIS platform's specific override (platformCopy in the wizard) rather than overwriting the shared master creative -- this is what actually reaches platformCreatives on the submitted campaign. */
+  onApplyPlatformCopy?: (platform: PlatformType, headline: string, primaryText: string) => void;
   onAddRsaHeadline?: (headline: string) => void;
 }
 
@@ -171,11 +174,13 @@ export interface PlatformVariation {
 
 export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
   enabledChannels,
+  businessName,
   masterHeadline,
   masterPrimaryText,
   objective,
   targetAudience,
   onApplyMasterCopy,
+  onApplyPlatformCopy,
   onAddRsaHeadline
 }) => {
   const [activePlatformTab, setActivePlatformTab] = useState<PlatformType>('google');
@@ -197,299 +202,96 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
     }
   }, [enabledChannels]);
 
-  // Refine text helper logic for specific platform rules
-  const generatePlatformVariationsForPlatform = (
-    platform: PlatformType,
-    origHeadline: string,
-    origText: string,
-    obj: string,
-    aud: string
-  ): PlatformVariation[] => {
+  // Calls the real per-platform AI creative endpoint (server.ts:
+  // /api/ai/generate-channel-creative), grounded in the actual business
+  // name, objective, audience, and master copy.
+  const fetchVariationForPlatform = async (platform: PlatformType): Promise<PlatformVariation[]> => {
     const spec = PLATFORM_SPECS[platform];
-
-    // Helper to truncate safely without cutting words
-    const safeTruncate = (str: string, maxLen: number) => {
-      if (!str) return '';
-      if (str.length <= maxLen) return str;
-      const sub = str.slice(0, maxLen);
-      const lastSpace = sub.lastIndexOf(' ');
-      if (lastSpace > maxLen * 0.5) {
-        return sub.slice(0, lastSpace);
-      }
-      return sub.trim();
-    };
-
-    const toTitleCase = (str: string) => {
-      if (!str) return '';
-      return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-    };
-
-    const hBase = origHeadline.trim() || 'Scale Digital Ads with AI';
-    const pBase = origText.trim() || 'Automate ad spend across channels with real-time ROAS optimization.';
-
-    if (platform === 'google') {
-      const v1Headline = safeTruncate(toTitleCase(hBase), spec.headlineLimit);
-
-      // Construct a relevant 2nd headline from hBase or pBase without hardcoded prefixes
-      let v2HeadlineCandidate = '';
-      if (hBase.includes(':') || hBase.includes('-')) {
-        v2HeadlineCandidate = hBase.split(/[:\-]/)[0].trim();
-      } else if (pBase) {
-        const firstClause = pBase.split(/[\.\,\;\:]/)[0].trim();
-        if (firstClause && firstClause.length >= 4 && firstClause.length <= 30) {
-          v2HeadlineCandidate = firstClause;
-        }
-      }
-      if (!v2HeadlineCandidate || v2HeadlineCandidate.length < 4) {
-        v2HeadlineCandidate = `Discover ${hBase}`;
-      }
-
-      const v2Headline = safeTruncate(toTitleCase(v2HeadlineCandidate), spec.headlineLimit);
-
-      const v1Desc = safeTruncate(pBase, spec.descriptionLimit);
-      const v2Desc = safeTruncate(masterHeadline ? `${hBase}. ${pBase}` : pBase, spec.descriptionLimit);
-
-      return [
-        {
+    try {
+      const res = await fetch('/api/ai/generate-channel-creative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           platform,
-          headline: v1Headline || 'Scale Campaign Performance',
-          description: v1Desc,
-          headlineCharCount: (v1Headline || 'Scale Campaign Performance').length,
-          headlineValid: (v1Headline || 'Scale Campaign Performance').length <= spec.headlineLimit,
-          descriptionCharCount: v1Desc.length,
-          descriptionValid: v1Desc.length <= spec.descriptionLimit,
-          bestPracticeTip: '🎯 Title Case Search Headline (Strict <= 30 chars)',
-          complianceScore: 98,
-          keyAdjustments: ['Title Case forced', 'Primary campaign context front-loaded', '30-char search limit enforced']
-        },
-        {
-          platform,
-          headline: v2Headline || 'Special Offer Available',
-          description: v2Desc,
-          headlineCharCount: (v2Headline || 'Special Offer Available').length,
-          headlineValid: (v2Headline || 'Special Offer Available').length <= spec.headlineLimit,
-          descriptionCharCount: v2Desc.length,
-          descriptionValid: v2Desc.length <= spec.descriptionLimit,
-          bestPracticeTip: '✨ Action-Oriented Offer Callout (Strict <= 30 chars)',
-          complianceScore: 95,
-          keyAdjustments: ['Campaign value proposition integrated', 'Target audience callout', 'Action-oriented conversion CTA']
-        }
-      ];
-    }
+          businessName,
+          targetAudience,
+          objective,
+          masterHeadline,
+          masterPrimaryText,
+        }),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const data = await res.json();
 
-    if (platform === 'meta') {
-      const v1Headline = safeTruncate(hBase, spec.headlineLimit);
-      const v1Desc = `🚀 ${pBase}${aud ? `\n\n• Designed for: ${aud}` : ''}\n\n👉 Click to learn more!`;
-      const v1FoldText = pBase.slice(0, 110);
+      const headline: string = data.headline || masterHeadline || '';
+      const description: string = data.primaryText || masterPrimaryText || '';
+      const headlineValid = headline.length <= spec.headlineLimit;
+      const descriptionValid = description.length <= spec.descriptionLimit;
 
-      const v2Headline = safeTruncate(hBase.length > 25 ? hBase : `Special Offer: ${hBase}`, spec.headlineLimit);
-      const v2Desc = `${aud ? `🔥 Built for ${aud}!\n\n` : ''}${pBase}\n\nGet started now 👇`;
+      let complianceScore = 100;
+      const keyAdjustments: string[] = [];
+      if (!headlineValid) { complianceScore -= 25; keyAdjustments.push(`Headline exceeds ${spec.headlineLimit}-char limit by ${headline.length - spec.headlineLimit}`); }
+      if (!descriptionValid) { complianceScore -= 25; keyAdjustments.push(`Body text exceeds ${spec.descriptionLimit}-char limit by ${description.length - spec.descriptionLimit}`); }
+      if (data.source === 'fallback_truncation') { complianceScore -= 10; keyAdjustments.push('AI unavailable -- this is your master copy, mechanically truncated to fit (not a rewrite)'); }
+      if (keyAdjustments.length === 0) keyAdjustments.push('Within all platform limits');
 
-      return [
-        {
-          platform,
-          headline: v1Headline || 'Discover Our Offer',
-          description: v1Desc,
-          headlineCharCount: (v1Headline || 'Discover Our Offer').length,
-          headlineValid: (v1Headline || 'Discover Our Offer').length <= spec.headlineLimit,
-          descriptionCharCount: v1FoldText.length,
-          descriptionValid: v1FoldText.length <= spec.descriptionFoldLimit!,
-          bestPracticeTip: '⚡ 125-char fold optimized for Facebook & Instagram mobile feeds',
-          complianceScore: 96,
-          keyAdjustments: ['Emojis for feed stopping power', 'First fold kept under 125 chars', 'Bullet points for mobile skimmability']
-        },
-        {
-          platform,
-          headline: v2Headline,
-          description: v2Desc,
-          headlineCharCount: v2Headline.length,
-          headlineValid: v2Headline.length <= spec.headlineLimit,
-          descriptionCharCount: Math.min(125, v2Desc.length),
-          descriptionValid: true,
-          bestPracticeTip: '🔥 High-converting list format for Instagram feed',
-          complianceScore: 94,
-          keyAdjustments: ['Direct call to action at top', 'Target audience callout', 'Campaign context highlighted']
-        }
-      ];
-    }
-
-    if (platform === 'linkedin') {
-      const v1Headline = safeTruncate(hBase, spec.headlineLimit);
-      const v1Desc = safeTruncate(`${pBase}${aud ? ` Tailored specifically for ${aud}.` : ''}`, spec.descriptionFoldLimit || 150);
-
-      const v2Headline = safeTruncate(`Discover: ${hBase}`, spec.headlineLimit);
-      const v2Desc = safeTruncate(`${pBase}${aud ? ` Drive maximum value for ${aud}.` : ''}`, spec.descriptionFoldLimit || 150);
-
-      return [
-        {
-          platform,
-          headline: v1Headline,
-          description: v1Desc,
-          headlineCharCount: v1Headline.length,
-          headlineValid: v1Headline.length <= spec.headlineLimit,
-          descriptionCharCount: v1Desc.length,
-          descriptionValid: v1Desc.length <= spec.descriptionFoldLimit!,
-          bestPracticeTip: '💼 Professional tone tailored for C-suite decision makers',
-          complianceScore: 97,
-          keyAdjustments: ['Professional terminology applied', '150-char LinkedIn intro fold compliant', 'Executive CTA']
-        },
-        {
-          platform,
-          headline: v2Headline,
-          description: v2Desc,
-          headlineCharCount: v2Headline.length,
-          headlineValid: v2Headline.length <= spec.headlineLimit,
-          descriptionCharCount: v2Desc.length,
-          descriptionValid: v2Desc.length <= spec.descriptionFoldLimit!,
-          bestPracticeTip: '📈 Strategic objective & ROI focus',
-          complianceScore: 92,
-          keyAdjustments: ['Objective benchmark', 'Professional attribution focus', 'Tailored messaging']
-        }
-      ];
-    }
-
-    if (platform === 'tiktok') {
-      const v1Headline = safeTruncate(`Check this out: ${hBase}`, spec.headlineLimit);
-      const v1Desc = safeTruncate(`${pBase} 🔥 Designed for ${aud || 'you'}!`, spec.descriptionLimit);
-
-      return [
-        {
-          platform,
-          headline: v1Headline,
-          description: v1Desc,
-          headlineCharCount: v1Headline.length,
-          headlineValid: v1Headline.length <= spec.headlineLimit,
-          descriptionCharCount: v1Desc.length,
-          descriptionValid: v1Desc.length <= spec.descriptionLimit,
-          bestPracticeTip: '📱 Native TikTok creator hook under 100 characters',
-          complianceScore: 95,
-          keyAdjustments: ['Casual creator tone', 'High energy hook', 'Under 100 char text overlay limit']
-        }
-      ];
-    }
-
-    if (platform === 'pinterest') {
-      const v1Headline = safeTruncate(`Guide: ${hBase}`, spec.headlineLimit);
-      const v1Desc = safeTruncate(`Explore ${obj || 'solutions'}: ${pBase}`, spec.descriptionLimit);
-
-      return [
-        {
-          platform,
-          headline: v1Headline,
-          description: v1Desc,
-          headlineCharCount: v1Headline.length,
-          headlineValid: v1Headline.length <= spec.headlineLimit,
-          descriptionCharCount: v1Desc.length,
-          descriptionValid: v1Desc.length <= spec.descriptionLimit,
-          bestPracticeTip: '📌 Searchable visual discovery keywords in first 50 chars',
-          complianceScore: 93,
-          keyAdjustments: ['How-to guide style title', 'Grid-view optimized preview', 'Inspirational discovery copy']
-        }
-      ];
-    }
-
-    if (platform === 'x') {
-      const v1Headline = safeTruncate(hBase, 80);
-      const v1Desc = safeTruncate(`${pBase} #${(obj || 'Growth').replace(/\s+/g, '')}`, spec.descriptionLimit);
-
-      return [
-        {
-          platform,
-          headline: v1Headline,
-          description: v1Desc,
-          headlineCharCount: v1Headline.length,
-          headlineValid: true,
-          descriptionCharCount: v1Desc.length,
-          descriptionValid: v1Desc.length <= spec.descriptionLimit,
-          bestPracticeTip: '🐦 Punchy tweet format with link hook and hashtag',
-          complianceScore: 94,
-          keyAdjustments: ['Direct newsy tone', 'End link placement', 'Single focused hashtag']
-        }
-      ];
-    }
-
-    // Programmatic DSP
-    const v1Headline = safeTruncate(toTitleCase(hBase), spec.headlineLimit) || 'Campaign Solution';
-    const v1Desc = safeTruncate(pBase, spec.descriptionLimit);
-
-    return [
-      {
+      return [{
         platform,
-        headline: v1Headline,
-        description: v1Desc,
-        headlineCharCount: v1Headline.length,
-        headlineValid: v1Headline.length <= spec.headlineLimit,
-        descriptionCharCount: v1Desc.length,
-        descriptionValid: v1Desc.length <= spec.descriptionLimit,
-        bestPracticeTip: '🎯 Ultra-concise banner headline',
-        complianceScore: 96,
-        keyAdjustments: ['25-char banner constraint', 'Clear product identification', 'High contrast text']
-      }
-    ];
+        headline,
+        description,
+        headlineCharCount: headline.length,
+        headlineValid,
+        descriptionCharCount: description.length,
+        descriptionValid,
+        bestPracticeTip: spec.bestPractices[0] ?? spec.toneGuide,
+        complianceScore: Math.max(0, complianceScore),
+        keyAdjustments,
+      }];
+    } catch (err) {
+      console.error(`AI generation failed for ${platform}:`, err);
+      const headline = (masterHeadline || '').slice(0, spec.headlineLimit);
+      const description = (masterPrimaryText || '').slice(0, spec.descriptionLimit);
+      return [{
+        platform,
+        headline,
+        description,
+        headlineCharCount: headline.length,
+        headlineValid: true,
+        descriptionCharCount: description.length,
+        descriptionValid: true,
+        bestPracticeTip: spec.bestPractices[0] ?? spec.toneGuide,
+        complianceScore: 0,
+        keyAdjustments: ['Generation request failed -- showing your master copy truncated as a placeholder. Try again.'],
+      }];
+    }
   };
 
   // Generate for all active platforms
   const handleRefineAllContent = async () => {
     setIsGenerating(true);
-    await new Promise(r => setTimeout(r, 200));
 
-    const newVars: Record<PlatformType, PlatformVariation[]> = {} as any;
-    const platformsToProcess = activePlatforms.length > 0 
-      ? activePlatforms 
+    const platformsToProcess = activePlatforms.length > 0
+      ? activePlatforms
       : (['google', 'meta', 'linkedin'] as PlatformType[]);
 
-    for (const plat of platformsToProcess) {
-      newVars[plat] = generatePlatformVariationsForPlatform(
-        plat,
-        masterHeadline,
-        masterPrimaryText,
-        objective,
-        targetAudience
-      );
+    const results = await Promise.all(
+      platformsToProcess.map(async plat => [plat, await fetchVariationForPlatform(plat)] as const)
+    );
+
+    const newVars: Record<PlatformType, PlatformVariation[]> = {} as any;
+    for (const [plat, vars] of results) {
+      newVars[plat] = vars;
     }
 
     setVariations(newVars);
     setIsGenerating(false);
   };
 
-  const activePlatformsKey = activePlatforms.join(',');
-
   // Auto-generate on initial render or when master copy changes if empty
   useEffect(() => {
-    let isCancelled = false;
-
-    const runRefine = async () => {
-      setIsGenerating(true);
-      await new Promise(r => setTimeout(r, 200));
-      if (isCancelled) return;
-
-      const newVars: Record<PlatformType, PlatformVariation[]> = {} as any;
-      const platformsToProcess = activePlatforms.length > 0 
-        ? activePlatforms 
-        : (['google', 'meta', 'linkedin'] as PlatformType[]);
-
-      for (const plat of platformsToProcess) {
-        newVars[plat] = generatePlatformVariationsForPlatform(
-          plat,
-          masterHeadline,
-          masterPrimaryText,
-          objective,
-          targetAudience
-        );
-      }
-
-      if (!isCancelled) {
-        setVariations(newVars);
-        setIsGenerating(false);
-      }
-    };
-
-    runRefine();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [masterHeadline, masterPrimaryText, activePlatformsKey, objective, targetAudience]);
+    handleRefineAllContent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePlatforms.join(',')]);
 
   const handleCopyText = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -500,6 +302,13 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
   const handleApplyVariation = (varItem: PlatformVariation, key: string) => {
     onApplyMasterCopy(varItem.headline, varItem.description);
     setAppliedKey(key);
+    setTimeout(() => setAppliedKey(null), 2500);
+  };
+
+  const handleApplyAsPlatformCopy = (varItem: PlatformVariation, key: string) => {
+    if (!onApplyPlatformCopy) return;
+    onApplyPlatformCopy(varItem.platform, varItem.headline, varItem.description);
+    setAppliedKey(key + '_platform');
     setTimeout(() => setAppliedKey(null), 2500);
   };
 
@@ -829,14 +638,28 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleApplyVariation(v, itemKey)}
-                      className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold uppercase tracking-wider rounded cursor-pointer transition-colors flex items-center gap-1.5 shadow-md shadow-amber-400/10"
-                    >
-                      {isApplied ? <CheckCircle2 className="w-3.5 h-3.5 text-black" /> : <Zap className="w-3.5 h-3.5" />}
-                      <span>{isApplied ? 'Applied to Master Creative!' : 'Apply as Master Creative'}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {onApplyPlatformCopy && (
+                        <button
+                          type="button"
+                          onClick={() => handleApplyAsPlatformCopy(v, itemKey)}
+                          title={`Save this as ${PLATFORM_SPECS[v.platform].name}'s own copy, without changing your master creative used by other channels`}
+                          className="px-3 py-1.5 bg-stone-900 hover:bg-stone-800 border border-amber-400/40 text-amber-400 text-xs font-bold uppercase tracking-wider rounded cursor-pointer transition-colors flex items-center gap-1.5"
+                        >
+                          {appliedKey === (itemKey + '_platform') ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Layers className="w-3.5 h-3.5" />}
+                          <span>{appliedKey === (itemKey + '_platform') ? `Saved for ${PLATFORM_SPECS[v.platform].name}!` : `Save as ${PLATFORM_SPECS[v.platform].name}-Only Copy`}</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleApplyVariation(v, itemKey)}
+                        className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold uppercase tracking-wider rounded cursor-pointer transition-colors flex items-center gap-1.5 shadow-md shadow-amber-400/10"
+                      >
+                        {appliedKey === itemKey ? <CheckCircle2 className="w-3.5 h-3.5 text-black" /> : <Zap className="w-3.5 h-3.5" />}
+                        <span>{appliedKey === itemKey ? 'Applied to Master Creative!' : 'Apply as Master Creative'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

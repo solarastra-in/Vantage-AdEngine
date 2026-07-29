@@ -61,6 +61,13 @@ export interface AbTestConfig {
   variants: AbTestVariant[];
 }
 
+export interface PlatformCreativeOverride {
+  headline: string;
+  primaryText: string;
+  callToAction: string;
+  mediaUrl?: string;
+}
+
 export interface Campaign {
   id: string;
   orgId?: string; // tenant scoping -- defaults to DEFAULT_ORG_ID server-side if absent (src/lib/tenantContext.server.ts)
@@ -74,6 +81,7 @@ export interface Campaign {
   targetAudience: string;
   channels: ChannelBudget[];
   creative: AdCreative;
+  platformCreatives?: Partial<Record<PlatformType, PlatformCreativeOverride>>;
   publishStatuses: PlatformPublishStatus[];
   metrics: {
     impressions: number;

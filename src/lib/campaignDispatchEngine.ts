@@ -117,12 +117,26 @@ function truncateAtWordBoundary(text: string, maxLen: number): string {
  * `valid: true` responses did not do.
  */
 export function transformForPlatform(
-  campaign: Pick<Campaign, 'creative'>,
+  campaign: Pick<Campaign, 'creative' | 'platformCreatives'>,
   channel: ChannelBudget
 ): PlatformPayload {
   const constraints = PLATFORM_CONSTRAINTS[channel.platform];
   const issues: TransformIssue[] = [];
-  const creative: AdCreative = campaign.creative;
+
+  // Prefer a real, platform-tailored override if one was generated for this
+  // channel (src/components/CampaignWizardModal.tsx's AI Content Refiner
+  // step) -- previously this data was generated in the wizard, included in
+  // the submit payload, and then silently dropped: the server never stored
+  // it and this function only ever read the single master `creative`,
+  // truncating it generically per platform regardless of what
+  // platform-specific copy had actually been written. Falls back to the
+  // master creative (with generic truncation) when no override exists for
+  // this platform, which is still correct behavior for channels the user
+  // didn't specifically tailor copy for.
+  const override = campaign.platformCreatives?.[channel.platform];
+  const creative: AdCreative = override
+    ? { headline: override.headline, primaryText: override.primaryText, callToAction: override.callToAction, mediaUrl: override.mediaUrl || campaign.creative.mediaUrl }
+    : campaign.creative;
 
   let headline = creative.headline;
   if (constraints.maxHeadlineLength && headline.length > constraints.maxHeadlineLength) {
