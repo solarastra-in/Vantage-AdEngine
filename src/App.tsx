@@ -458,12 +458,44 @@ export function App() {
     );
   };
 
-  // Gemini AI Helper
+  // Gemini AI Helper with Enriched Campaign Scope & Channel Constraints Prompt Construction
   const handleOptimizeWithAi = async (promptData: any) => {
+    const activeChannelsList = Array.isArray(promptData?.channels)
+      ? promptData.channels.map((c: any) => c.platformName || c.platform || c).join(', ')
+      : 'Meta, Google, LinkedIn, TikTok, Pinterest, X, Programmatic DSP';
+
+    const enrichedPromptData = {
+      ...promptData,
+      campaignName: promptData?.campaignName || 'Digital Ad Campaign',
+      objective: promptData?.objective || 'Lead Generation',
+      targetAudience: promptData?.targetAudience || 'Target Audience Persona',
+      currentHeadline: promptData?.currentHeadline || '',
+      currentBody: promptData?.currentBody || '',
+      metadata: {
+        activeChannels: activeChannelsList,
+        requestedAt: new Date().toISOString(),
+        orgId: currentOrgId,
+      },
+      channelConstraints: {
+        googleAds: 'Headlines MUST be 30 chars max. Descriptions MUST be 90 chars max.',
+        metaAds: 'Headlines MUST be 40 chars max. Primary text MUST be 125 chars max.',
+        linkedInAds: 'Headlines MUST be 70 chars max. Body text MUST be 150 chars max.',
+        tikTokAds: 'Text hook MUST be 100 chars max. Vertical 9:16 ratio.',
+        pinterestAds: 'Pin title MUST be 100 chars max. Pin description MUST be 500 chars max.',
+        xAds: 'Tweet copy MUST be 280 chars max.',
+        programmaticDsp: 'Standard display formats: 300x250, 728x90, 160x600.',
+      },
+      instructions: `You MUST strictly adhere to channel-specific character limits. 
+Specifically:
+- All generated headlines in improvedHeadlines MUST NOT exceed 30 characters so they are 100% compliant with Google Ads and Meta.
+- All generated body texts in improvedPrimaryText MUST NOT exceed 90 characters so they are 100% compliant with Google RSA and Meta feed standards.
+- Every headline and text generated must be 100% scoped to the target audience: "${promptData?.targetAudience || 'Target Audience'}" and objective: "${promptData?.objective || 'Lead Generation'}".`,
+    };
+
     const res = await fetch('/api/ai/optimize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(promptData),
+      body: JSON.stringify(enrichedPromptData),
     });
     return await res.json();
   };

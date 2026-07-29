@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Sparkles, 
@@ -48,7 +48,9 @@ import {
   saveChannelCredentialsToFirestore,
   saveWizardDraftToFirestore,
   fetchWizardDraftFromFirestore,
-  deleteWizardDraftFromFirestore
+  deleteWizardDraftFromFirestore,
+  listWizardDraftsFromFirestore,
+  WizardDraft
 } from '../lib/firestoreService';
 import { validateChannelApiKeyFormat } from '../lib/encryption';
 import { AiContentRefiner } from './AiContentRefiner';
@@ -208,6 +210,121 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     { platform: 'x', platformName: 'X (Twitter) Ads', budget: 0, enabled: false, targeting: 'Followers of Tech Outlets' },
     { platform: 'programmatic', platformName: 'Programmatic DSP', budget: 0, enabled: false, targeting: 'B2B Tech Sites' },
   ]);
+
+  // Real-Time Channel Constraints & Scope Audit Validation
+  const channelValidationErrors = useMemo(() => {
+    const errors: { field: string; message: string; severity: 'error' | 'warning'; type: 'char_limit' | 'aspect_ratio' | 'required' }[] = [];
+
+    // 1. Campaign Metadata
+    if (!name.trim() || name.trim().length < 3) {
+      errors.push({ field: 'name', message: 'Campaign Name is required (min 3 characters).', severity: 'error', type: 'required' });
+    }
+    if (!targetAudience.trim() || targetAudience.trim().length < 5) {
+      errors.push({ field: 'targetAudience', message: 'Target Audience persona is required (min 5 characters).', severity: 'error', type: 'required' });
+    }
+
+    // 2. Headline Character Limits
+    if (!headline.trim()) {
+      errors.push({ field: 'headline', message: 'Master Headline is required.', severity: 'error', type: 'required' });
+    } else {
+      if (headline.length > 30) {
+        errors.push({ field: 'headline', message: `Master Headline exceeds Google Ads 30-char limit (${headline.length}/30 chars).`, severity: 'error', type: 'char_limit' });
+      }
+      if (headline.length > 40) {
+        errors.push({ field: 'headline', message: `Master Headline exceeds Meta/LinkedIn 40-char limit (${headline.length}/40 chars).`, severity: 'warning', type: 'char_limit' });
+      }
+    }
+
+    // 3. Primary Body Text Character Limits
+    if (!primaryText.trim()) {
+      errors.push({ field: 'primaryText', message: 'Master Primary Body Text is required.', severity: 'error', type: 'required' });
+    } else {
+      if (primaryText.length > 90) {
+        errors.push({ field: 'primaryText', message: `Master Primary Text exceeds Google RSA 90-char limit (${primaryText.length}/90 chars).`, severity: 'error', type: 'char_limit' });
+      }
+      if (primaryText.length > 125) {
+        errors.push({ field: 'primaryText', message: `Master Primary Text exceeds Meta Feed 125-char limit (${primaryText.length}/125 chars).`, severity: 'warning', type: 'char_limit' });
+      }
+    }
+
+    if (!callToAction.trim()) {
+      errors.push({ field: 'callToAction', message: 'Call To Action (CTA) is required.', severity: 'error', type: 'required' });
+    }
+
+    // 4. Google RSA Headlines Character Limits
+    googleRsaHeadlines.forEach((h, idx) => {
+      if (h.length > 30) {
+        errors.push({ field: `rsaHeadline_${idx}`, message: `Google RSA Headline #${idx + 1} exceeds 30-char limit (${h.length}/30 chars).`, severity: 'error', type: 'char_limit' });
+      }
+    });
+
+    // 5. Google RSA Descriptions Character Limits
+    googleRsaDescriptions.forEach((d, idx) => {
+      if (d.length > 90) {
+        errors.push({ field: `rsaDesc_${idx}`, message: `Google RSA Description #${idx + 1} exceeds 90-char limit (${d.length}/90 chars).`, severity: 'error', type: 'char_limit' });
+      }
+    });
+
+    // 6. Active Channel Aspect Ratio Constraints
+    const activePlatforms = selectedChannels.filter(c => c.enabled).map(c => c.platform);
+
+    if (activePlatforms.includes('google')) {
+      if (!platformImages.square1x1) {
+        errors.push({ field: 'aspect_square1x1', message: 'Google Ads requires 1:1 Square aspect ratio image asset.', severity: 'error', type: 'aspect_ratio' });
+      }
+      if (!platformImages.landscape191x1) {
+        errors.push({ field: 'aspect_landscape191x1', message: 'Google Ads requires 1.91:1 Landscape aspect ratio image asset.', severity: 'error', type: 'aspect_ratio' });
+      }
+    }
+
+    if (activePlatforms.includes('meta')) {
+      if (!platformImages.square1x1) {
+        errors.push({ field: 'aspect_square1x1', message: 'Meta Ads requires 1:1 Square Feed aspect ratio asset.', severity: 'error', type: 'aspect_ratio' });
+      }
+      if (!platformImages.vertical9x16) {
+        errors.push({ field: 'aspect_vertical9x16', message: 'Meta Ads requires 9:16 Vertical Story/Reels aspect ratio asset.', severity: 'error', type: 'aspect_ratio' });
+      }
+    }
+
+    if (activePlatforms.includes('tiktok')) {
+      if (!platformImages.vertical9x16) {
+        errors.push({ field: 'aspect_vertical9x16', message: 'TikTok Ads requires 9:16 Vertical aspect ratio asset.', severity: 'error', type: 'aspect_ratio' });
+      }
+    }
+
+    if (activePlatforms.includes('linkedin')) {
+      if (!platformImages.square1x1 && !platformImages.landscape191x1) {
+        errors.push({ field: 'aspect_linkedin', message: 'LinkedIn Ads requires 1:1 Square or 1.91:1 Landscape aspect ratio asset.', severity: 'error', type: 'aspect_ratio' });
+      }
+    }
+
+    if (activePlatforms.includes('pinterest')) {
+      if (!platformImages.vertical2x3 && !platformImages.vertical9x16) {
+        errors.push({ field: 'aspect_pinterest', message: 'Pinterest Ads requires 2:3 or 9:16 Vertical Pin aspect ratio asset.', severity: 'error', type: 'aspect_ratio' });
+      }
+    }
+
+    if (activePlatforms.includes('programmatic')) {
+      if (!platformImages.medRec300x250 && !platformImages.leaderboard728x90) {
+        errors.push({ field: 'aspect_programmatic', message: 'Programmatic DSP requires 300x250 or 728x90 display banner assets.', severity: 'error', type: 'aspect_ratio' });
+      }
+    }
+
+    return errors;
+  }, [name, targetAudience, headline, primaryText, callToAction, googleRsaHeadlines, googleRsaDescriptions, selectedChannels, platformImages]);
+
+  // Auto-fix character limits function
+  const handleAutoFixCharacterLimits = () => {
+    if (headline.length > 30) {
+      setHeadline(prev => prev.slice(0, 30).trim());
+    }
+    if (primaryText.length > 90) {
+      setPrimaryText(prev => prev.slice(0, 90).trim());
+    }
+    setGoogleRsaHeadlines(prev => prev.map(h => h.length > 30 ? h.slice(0, 30).trim() : h));
+    setGoogleRsaDescriptions(prev => prev.map(d => d.length > 90 ? d.slice(0, 90).trim() : d));
+    setIsContextVerified(true);
+  };
 
   // Expanded Advanced Options accordion state per platform
   const [expandedAdvanced, setExpandedAdvanced] = useState<Record<PlatformType, boolean>>({
@@ -663,51 +780,105 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   }, [orgId]);
 
   const tenantOrgId = orgId || 'org-astracloud';
+  const LOCAL_DRAFT_KEY = `vantage_adengine_wizard_draft_${tenantOrgId}`;
+  const LOCAL_DRAFT_LIST_KEY = `vantage_adengine_wizard_drafts_list_${tenantOrgId}`;
+
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'restored'>('idle');
   const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
 
-  // Restore active draft from Firestore when modal opens
-  useEffect(() => {
-    let isCancelled = false;
-    if (isOpen) {
-      fetchWizardDraftFromFirestore(tenantOrgId).then((draft) => {
-        if (isCancelled) return;
-        if (draft && draft.stepData) {
-          const d = draft.stepData;
-          if (d.name !== undefined) setName(d.name);
-          if (d.objective !== undefined) setObjective(d.objective);
-          if (d.targetAudience !== undefined) setTargetAudience(d.targetAudience);
-          if (d.totalBudget !== undefined) setTotalBudget(d.totalBudget);
-          if (d.startDate !== undefined) setStartDate(d.startDate);
-          if (d.endDate !== undefined) setEndDate(d.endDate);
-          if (d.headline !== undefined) setHeadline(d.headline);
-          if (d.primaryText !== undefined) setPrimaryText(d.primaryText);
-          if (d.callToAction !== undefined) setCallToAction(d.callToAction);
-          if (d.masterMediaUrl !== undefined) setMasterMediaUrl(d.masterMediaUrl);
-          if (d.googleRsaHeadlines !== undefined) setGoogleRsaHeadlines(d.googleRsaHeadlines);
-          if (d.googleRsaDescriptions !== undefined) setGoogleRsaDescriptions(d.googleRsaDescriptions);
-          if (d.platformImages !== undefined) setPlatformImages(d.platformImages);
-          if (d.platformCopy !== undefined) setPlatformCopy(d.platformCopy);
-          if (d.selectedChannels !== undefined) setSelectedChannels(d.selectedChannels);
-          if (d.metaBidding !== undefined) setMetaBidding(d.metaBidding);
-          if (d.googleBidding !== undefined) setGoogleBidding(d.googleBidding);
-          if (d.abTestConfig !== undefined) setAbTestConfig(d.abTestConfig);
-          if (d.customerName !== undefined) setCustomerName(d.customerName);
-          if (d.customerEmail !== undefined) setCustomerEmail(d.customerEmail);
-          if (draft.step) setStep(draft.step as any);
+  // Drafts Drawer & List Management State
+  const [showDraftsDrawer, setShowDraftsDrawer] = useState(false);
+  const [allSavedDrafts, setAllSavedDrafts] = useState<WizardDraft[]>([]);
+  const [activeDraftNotification, setActiveDraftNotification] = useState<{
+    name: string;
+    updatedAtTime: string;
+    lastSavedStepName: string;
+    step: number;
+    rawDraft: WizardDraft;
+  } | null>(null);
 
-          setAutoSaveStatus('restored');
-          setLastSavedTimestamp(draft.updatedAt ? new Date(draft.updatedAt).toLocaleTimeString() : new Date().toLocaleTimeString());
-        }
-      });
+  // Onboarding Interactive Tutorial State
+  const [showOnboardingTour, setShowOnboardingTour] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+
+  const ONBOARDING_TOUR_STEPS = [
+    {
+      title: "1. AI Campaign Blueprint & Creative Copy Synthesizer",
+      wizardStep: 1,
+      badge: "Step 1: AI Creative Engine",
+      description: "Define your campaign objective, target persona, and primary offer. Click 'Optimize Copy with Gemini AI' to generate character-compliant headlines (30 chars for Google Ads, 40 chars for Meta) and primary text automatically.",
+      proTip: "Pro-Tip: Multi-aspect ratio image previews (16:9 Landscape, 1:1 Square, 9:16 Vertical Story) auto-crop visual assets to match channel dimensions!"
+    },
+    {
+      title: "2. Omnichannel Budget & AI Bidding Strategy Engine",
+      wizardStep: 2,
+      badge: "Step 2: Budget & Bid Optimization",
+      description: "Allocate channel budgets with automated ROAS optimization. Fetch real-time bid strategies from Google Ads, Meta, LinkedIn, and TikTok, or set custom CPM/CPC caps.",
+      proTip: "Pro-Tip: Toggle A/B testing variants to run creative split tests across channels with real-time performance tracking."
+    },
+    {
+      title: "3. Pre-Flight Policy Validation & Credential Handshake",
+      wizardStep: 3,
+      badge: "Step 3: Pre-Flight Verification",
+      description: "Our automated pre-flight checker inspects headline character lengths, missing landing page URLs, and validates channel API keys against platform policy standards before launch.",
+      proTip: "Pro-Tip: Missing API keys can be saved directly into encrypted Firestore storage right from Step 3."
+    },
+    {
+      title: "4. Multi-Channel API Payload Dispatch & 30-Sec Auto-Save",
+      wizardStep: 4,
+      badge: "Step 4: Live Payload Synthesis",
+      description: "Review generated JSON payloads for Google RSA, Meta AdSet, LinkedIn Direct Ads, TikTok, Pinterest, X, and DSP. Click 'Dispatch Campaign' to deploy live across all active channels.",
+      proTip: "Pro-Tip: All campaign progress automatically saves to Firestore & LocalStorage every 30 seconds. Click 'View Saved Drafts' anytime to resume!"
     }
-    return () => {
-      isCancelled = true;
-    };
-  }, [isOpen, tenantOrgId]);
+  ];
 
-  // Auto-save every step transition or form update automatically to Firestore
+  // Auto-launch onboarding tour for first-time visitors when modal opens
   useEffect(() => {
+    if (isOpen) {
+      try {
+        const completed = localStorage.getItem('vantage_wizard_onboarding_completed');
+        if (!completed) {
+          setShowOnboardingTour(true);
+          setTourStepIndex(0);
+        }
+      } catch (e) {
+        console.warn('Error reading onboarding status:', e);
+      }
+    }
+  }, [isOpen]);
+
+  // Helper to construct complete step data object for draft storage
+  const buildCurrentStepData = () => ({
+    name,
+    objective,
+    targetAudience,
+    totalBudget,
+    startDate,
+    endDate,
+    headline,
+    primaryText,
+    callToAction,
+    masterMediaUrl,
+    googleRsaHeadlines,
+    googleRsaDescriptions,
+    platformImages,
+    platformCopy,
+    selectedChannels,
+    metaBidding,
+    googleBidding,
+    linkedinBidding,
+    tiktokBidding,
+    pinterestBidding,
+    xBidding,
+    dspBidding,
+    abTestConfig,
+    customerName,
+    customerEmail,
+    isContextVerified,
+  });
+
+  // Helper function to execute auto-save to both localStorage and Firestore
+  const executeAutoSave = async (isIntervalSave = false) => {
     if (!isOpen) return;
 
     const stepTitles: Record<number, string> = {
@@ -717,45 +888,204 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       4: 'Payload & Dispatch'
     };
 
-    const timer = setTimeout(async () => {
-      setAutoSaveStatus('saving');
-      const now = new Date().toISOString();
-      try {
-        await saveWizardDraftToFirestore(tenantOrgId, {
-          id: 'active_wizard_draft',
-          step,
-          updatedAt: now,
-          lastSavedStepName: stepTitles[step] || `Step ${step}`,
-          stepData: {
-            name,
-            objective,
-            targetAudience,
-            totalBudget,
-            startDate,
-            endDate,
-            headline,
-            primaryText,
-            callToAction,
-            masterMediaUrl,
-            googleRsaHeadlines,
-            googleRsaDescriptions,
-            platformImages,
-            platformCopy,
-            selectedChannels,
-            metaBidding,
-            googleBidding,
-            abTestConfig,
-            customerName,
-            customerEmail,
-          }
-        });
-        setAutoSaveStatus('saved');
-        setLastSavedTimestamp(new Date().toLocaleTimeString());
-      } catch (e) {
-        console.error('Error auto-saving wizard step to Firestore:', e);
-        setAutoSaveStatus('idle');
+    setAutoSaveStatus('saving');
+    const now = new Date().toISOString();
+    const draftId = 'active_wizard_draft';
+    const lastSavedStepName = stepTitles[step] || `Step ${step}`;
+
+    const draftObj: WizardDraft = {
+      id: draftId,
+      step,
+      updatedAt: now,
+      lastSavedStepName,
+      stepData: buildCurrentStepData(),
+    };
+
+    try {
+      // 1. Save to LocalStorage (Instant synchronous fallback)
+      localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draftObj));
+
+      // Maintain a history list of drafts in LocalStorage without creating duplicate DRAFT campaigns in database
+      const existingListRaw = localStorage.getItem(LOCAL_DRAFT_LIST_KEY);
+      let draftList: WizardDraft[] = [];
+      if (existingListRaw) {
+        try { draftList = JSON.parse(existingListRaw); } catch (e) { draftList = []; }
       }
-    }, 600);
+      
+      const idx = draftList.findIndex(d => d.id === draftId || (d.stepData && d.stepData.name === name));
+      if (idx >= 0) {
+        draftList[idx] = draftObj;
+      } else {
+        draftList.unshift(draftObj);
+      }
+      draftList = draftList.slice(0, 10);
+      localStorage.setItem(LOCAL_DRAFT_LIST_KEY, JSON.stringify(draftList));
+
+      // 2. Save to Firestore persistent collection
+      await saveWizardDraftToFirestore(tenantOrgId, draftObj);
+
+      setAutoSaveStatus('saved');
+      setLastSavedTimestamp(new Date().toLocaleTimeString());
+      loadAllDrafts();
+    } catch (e) {
+      console.error('Error in executeAutoSave:', e);
+      setAutoSaveStatus('idle');
+    }
+  };
+
+  // Function to load all saved drafts from Firestore & LocalStorage
+  const loadAllDrafts = async () => {
+    const firestoreDrafts = await listWizardDraftsFromFirestore(tenantOrgId);
+    let localList: WizardDraft[] = [];
+    try {
+      const raw = localStorage.getItem(LOCAL_DRAFT_LIST_KEY);
+      if (raw) localList = JSON.parse(raw);
+    } catch (e) {
+      localList = [];
+    }
+
+    const draftMap = new Map<string, WizardDraft>();
+    localList.forEach(d => { if (d && d.id) draftMap.set(d.id, d); });
+    firestoreDrafts.forEach(d => { if (d && d.id) draftMap.set(d.id, d); });
+
+    const merged = Array.from(draftMap.values()).sort(
+      (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+    );
+    setAllSavedDrafts(merged);
+  };
+
+  // Helper to apply/restore a chosen draft into wizard state
+  const handleApplyDraft = (draft: WizardDraft) => {
+    if (!draft || !draft.stepData) return;
+    const d = draft.stepData;
+    if (d.name !== undefined) setName(d.name);
+    if (d.objective !== undefined) setObjective(d.objective);
+    if (d.targetAudience !== undefined) setTargetAudience(d.targetAudience);
+    if (d.totalBudget !== undefined) setTotalBudget(d.totalBudget);
+    if (d.startDate !== undefined) setStartDate(d.startDate);
+    if (d.endDate !== undefined) setEndDate(d.endDate);
+    if (d.headline !== undefined) setHeadline(d.headline);
+    if (d.primaryText !== undefined) setPrimaryText(d.primaryText);
+    if (d.callToAction !== undefined) setCallToAction(d.callToAction);
+    if (d.masterMediaUrl !== undefined) setMasterMediaUrl(d.masterMediaUrl);
+    if (d.googleRsaHeadlines !== undefined) setGoogleRsaHeadlines(d.googleRsaHeadlines);
+    if (d.googleRsaDescriptions !== undefined) setGoogleRsaDescriptions(d.googleRsaDescriptions);
+    if (d.platformImages !== undefined) setPlatformImages(d.platformImages);
+    if (d.platformCopy !== undefined) setPlatformCopy(d.platformCopy);
+    if (d.selectedChannels !== undefined) setSelectedChannels(d.selectedChannels);
+    if (d.metaBidding !== undefined) setMetaBidding(d.metaBidding);
+    if (d.googleBidding !== undefined) setGoogleBidding(d.googleBidding);
+    if (d.linkedinBidding !== undefined) setLinkedinBidding(d.linkedinBidding);
+    if (d.tiktokBidding !== undefined) setTikTokBidding(d.tiktokBidding);
+    if (d.pinterestBidding !== undefined) setPinterestBidding(d.pinterestBidding);
+    if (d.xBidding !== undefined) setXBidding(d.xBidding);
+    if (d.dspBidding !== undefined) setDspBidding(d.dspBidding);
+    if (d.abTestConfig !== undefined) setAbTestConfig(d.abTestConfig);
+    if (d.customerName !== undefined) setCustomerName(d.customerName);
+    if (d.customerEmail !== undefined) setCustomerEmail(d.customerEmail);
+    if (d.isContextVerified !== undefined) setIsContextVerified(d.isContextVerified);
+    if (draft.step) setStep(draft.step as any);
+
+    setAutoSaveStatus('restored');
+    setLastSavedTimestamp(draft.updatedAt ? new Date(draft.updatedAt).toLocaleTimeString() : new Date().toLocaleTimeString());
+    setActiveDraftNotification(null);
+    setShowDraftsDrawer(false);
+  };
+
+  // Helper to delete a draft from both Firestore & LocalStorage
+  const handleDeleteDraft = async (draftId: string) => {
+    try {
+      await deleteWizardDraftFromFirestore(tenantOrgId, draftId);
+    } catch (e) {
+      console.warn('Error deleting draft from Firestore:', e);
+    }
+
+    try {
+      localStorage.removeItem(LOCAL_DRAFT_KEY);
+      const rawList = localStorage.getItem(LOCAL_DRAFT_LIST_KEY);
+      if (rawList) {
+        let list: WizardDraft[] = JSON.parse(rawList);
+        list = list.filter(d => d.id !== draftId);
+        localStorage.setItem(LOCAL_DRAFT_LIST_KEY, JSON.stringify(list));
+      }
+    } catch (e) {
+      console.warn('Error deleting draft from LocalStorage:', e);
+    }
+
+    if (activeDraftNotification?.rawDraft?.id === draftId) {
+      setActiveDraftNotification(null);
+    }
+    loadAllDrafts();
+  };
+
+  // Clear current active draft & reset form
+  const handleClearActiveDraft = () => {
+    handleDeleteDraft('active_wizard_draft');
+    setActiveDraftNotification(null);
+  };
+
+  // Restore active draft detection on modal open
+  useEffect(() => {
+    let isCancelled = false;
+    if (isOpen) {
+      loadAllDrafts();
+
+      // Check LocalStorage first for instant restore availability
+      let localDraft: WizardDraft | null = null;
+      try {
+        const raw = localStorage.getItem(LOCAL_DRAFT_KEY);
+        if (raw) localDraft = JSON.parse(raw);
+      } catch (e) {
+        localDraft = null;
+      }
+
+      fetchWizardDraftFromFirestore(tenantOrgId).then((firestoreDraft) => {
+        if (isCancelled) return;
+        const draftToUse = firestoreDraft || localDraft;
+        if (draftToUse && draftToUse.stepData && draftToUse.stepData.name) {
+          setActiveDraftNotification({
+            name: draftToUse.stepData.name || 'Untitled Draft',
+            updatedAtTime: draftToUse.updatedAt ? new Date(draftToUse.updatedAt).toLocaleTimeString() : 'Recently',
+            lastSavedStepName: draftToUse.lastSavedStepName || `Step ${draftToUse.step || 1}`,
+            step: draftToUse.step || 1,
+            rawDraft: draftToUse,
+          });
+        }
+      });
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, tenantOrgId]);
+
+  // 1. Recurring 30-Second Auto-Save Interval Timer
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const intervalId = setInterval(() => {
+      executeAutoSave(true);
+    }, 30000); // 30 seconds interval timer
+
+    return () => clearInterval(intervalId);
+  }, [
+    isOpen,
+    step,
+    name,
+    objective,
+    targetAudience,
+    totalBudget,
+    headline,
+    primaryText,
+    selectedChannels,
+  ]);
+
+  // 2. Debounced edit auto-save (1 second after typing stops)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const timer = setTimeout(() => {
+      executeAutoSave(false);
+    }, 1000);
 
     return () => clearTimeout(timer);
   }, [
@@ -779,6 +1109,11 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     selectedChannels,
     metaBidding,
     googleBidding,
+    linkedinBidding,
+    tiktokBidding,
+    pinterestBidding,
+    xBidding,
+    dspBidding,
     abTestConfig,
     customerName,
     customerEmail,
@@ -1684,29 +2019,57 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-stone-900 border border-stone-800 text-emerald-400 rounded text-[10px] font-mono">
                   {autoSaveStatus === 'saving' && (
                     <>
-                      <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
-                      <span className="text-amber-400">Saving Step to Firestore...</span>
+                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
+                      <span className="text-amber-400 font-semibold">Auto-saving 30s draft...</span>
                     </>
                   )}
                   {autoSaveStatus === 'saved' && (
                     <>
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      <span>Auto-saved to Firestore {lastSavedTimestamp ? `at ${lastSavedTimestamp}` : ''}</span>
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <span>Auto-saved {lastSavedTimestamp ? `at ${lastSavedTimestamp}` : ''}</span>
                     </>
                   )}
                   {autoSaveStatus === 'restored' && (
                     <>
-                      <ShieldCheck className="w-3 h-3 text-amber-400" />
-                      <span>Draft Restored from Firestore</span>
+                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Draft Restored</span>
                     </>
                   )}
                   {autoSaveStatus === 'idle' && (
                     <>
-                      <CheckCircle2 className="w-3 h-3 text-stone-400" />
-                      <span className="text-stone-400">Firestore Step Sync Active</span>
+                      <CheckCircle2 className="w-3 h-3 text-stone-400 shrink-0" />
+                      <span className="text-stone-400">Auto-Save 30s Active</span>
                     </>
                   )}
                 </div>
+
+                {/* Saved Drafts Drawer Toggle Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadAllDrafts();
+                    setShowDraftsDrawer(true);
+                  }}
+                  className="bg-stone-900 border border-stone-700 hover:border-amber-400 text-amber-300 hover:text-amber-200 text-[11px] font-mono px-2.5 py-0.5 rounded flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="View and restore saved campaign drafts from Firestore"
+                >
+                  <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>View Saved Drafts ({allSavedDrafts.length})</span>
+                </button>
+
+                {/* AI Guided Tour Toggle Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTourStepIndex(0);
+                    setShowOnboardingTour(true);
+                  }}
+                  className="bg-amber-400/10 border border-amber-400/30 hover:bg-amber-400/20 text-amber-300 hover:text-amber-200 text-[11px] font-mono px-2.5 py-0.5 rounded flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Launch interactive step-by-step AI workflow tutorial"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+                  <span>AI Guided Tour</span>
+                </button>
               </div>
               <p className="text-[11px] text-stone-400 font-mono mt-0.5">
                 Multi-ratio visual asset management, channel-specific bidding strategies, and direct API payload synthesis
@@ -1775,6 +2138,53 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
           {/* STEP 1: Campaign Blueprint, Copy & Multi-Platform Aspect Ratio Image Assets */}
           {step === 1 && (
             <div className="space-y-6 font-mono">
+              {/* Active Draft Detection Top Banner */}
+              {activeDraftNotification && (
+                <div className="bg-amber-950/40 border border-amber-500/40 p-3.5 rounded-lg font-mono text-xs text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-inner">
+                  <div className="flex items-center gap-2.5">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                    <div>
+                      <div className="font-bold text-amber-300 flex items-center gap-2">
+                        <span>Auto-Saved Campaign Draft Available</span>
+                        <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400/30">
+                          {activeDraftNotification.lastSavedStepName}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-stone-300 mt-0.5">
+                        Last modified at {activeDraftNotification.updatedAtTime} for "{activeDraftNotification.name}"
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleApplyDraft(activeDraftNotification.rawDraft)}
+                      className="px-3 py-1.5 bg-amber-400 text-stone-950 font-bold text-xs rounded hover:bg-amber-300 transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Resume Draft</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loadAllDrafts();
+                        setShowDraftsDrawer(true);
+                      }}
+                      className="px-2.5 py-1.5 bg-stone-900 border border-stone-700 hover:border-amber-400 text-stone-300 text-xs rounded transition-colors cursor-pointer"
+                    >
+                      <span>All Drafts ({allSavedDrafts.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearActiveDraft}
+                      className="px-2 py-1.5 text-stone-400 hover:text-red-400 text-xs transition-colors cursor-pointer"
+                      title="Discard auto-saved draft"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-stone-800 pb-3 gap-2">
                 <h3 className="text-xs uppercase tracking-[0.2em] font-bold text-amber-400 flex items-center gap-2">
                   <Sliders className="w-4 h-4" />
@@ -1907,16 +2317,20 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                 </div>
 
                 {/* Gemini AI Context Verification Panel */}
-                <div className="bg-amber-950/20 border border-amber-500/30 rounded p-4 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-2.5">
-                    <div className="flex items-center gap-2">
+                <div className="bg-amber-950/20 border border-amber-500/40 rounded-lg p-4 space-y-3.5 shadow-inner">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Bot className="w-4 h-4 text-amber-400" />
                       <span className="text-xs uppercase font-bold text-amber-300 tracking-wider">
-                        Gemini AI Context Verification
+                        Gemini AI Context Verification & Channel Audit
                       </span>
-                      {isContextVerified ? (
+                      {channelValidationErrors.length > 0 ? (
+                        <span className="bg-red-500/20 border border-red-500/40 text-red-400 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" /> {channelValidationErrors.length} Constraint Violation{channelValidationErrors.length > 1 ? 's' : ''}
+                        </span>
+                      ) : isContextVerified ? (
                         <span className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Context Verified for Gemini
+                          <CheckCircle2 className="w-3 h-3" /> Verified & Compliant for Gemini
                         </span>
                       ) : (
                         <span className="bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded">
@@ -1924,46 +2338,111 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                         </span>
                       )}
                     </div>
-                    <label className="flex items-center gap-2 cursor-pointer bg-stone-900 border border-stone-700 px-3 py-1 rounded hover:border-amber-400 transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={isContextVerified}
-                        onChange={e => setIsContextVerified(e.target.checked)}
-                        className="rounded border-stone-700 text-amber-400 focus:ring-amber-400 bg-stone-950 h-3.5 w-3.5 cursor-pointer"
-                      />
-                      <span className="text-xs text-stone-200 font-semibold">
-                        Verify & Lock Campaign Scope
-                      </span>
-                    </label>
+
+                    <div className="flex items-center gap-2">
+                      {channelValidationErrors.some(e => e.type === 'char_limit') && (
+                        <button
+                          type="button"
+                          onClick={handleAutoFixCharacterLimits}
+                          className="px-2.5 py-1 bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-400/50 text-[11px] font-bold rounded flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Zap className="w-3 h-3 text-amber-300" />
+                          <span>Auto-Fix Char Limits</span>
+                        </button>
+                      )}
+
+                      <label className="flex items-center gap-2 cursor-pointer bg-stone-900 border border-stone-700 px-3 py-1 rounded hover:border-amber-400 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={isContextVerified}
+                          onChange={e => setIsContextVerified(e.target.checked)}
+                          className="rounded border-stone-700 text-amber-400 focus:ring-amber-400 bg-stone-950 h-3.5 w-3.5 cursor-pointer"
+                        />
+                        <span className="text-xs text-stone-200 font-semibold">
+                          Verify & Lock Scope
+                        </span>
+                      </label>
+                    </div>
                   </div>
 
-                  <p className="text-[11px] text-stone-300 font-sans">
-                    Review the verified campaign metadata below before executing AI generation. These inputs are passed directly to Gemini to generate 100% scoped headlines and descriptions:
+                  <p className="text-[11px] text-stone-300 font-sans leading-relaxed">
+                    Verify the campaign context and channel constraints below before executing AI generation. These verified inputs are passed directly to Gemini to generate 100% compliant ad copy and asset variations.
                   </p>
 
+                  {/* Verified Campaign Metadata Grid */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                    <div className="bg-black/60 p-2.5 rounded border border-stone-800">
-                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Campaign Name</div>
+                    <div className={`p-2.5 rounded border ${name.trim().length >= 3 ? 'bg-black/60 border-stone-800' : 'bg-red-950/20 border-red-500/40'}`}>
+                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5 flex items-center justify-between">
+                        <span>Campaign Name</span>
+                        {name.trim().length < 3 && <AlertCircle className="w-3 h-3 text-red-400" />}
+                      </div>
                       <div className="text-stone-200 truncate font-mono font-semibold">{name || 'Not specified'}</div>
                     </div>
+
                     <div className="bg-black/60 p-2.5 rounded border border-stone-800">
                       <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Objective</div>
                       <div className="text-amber-300 truncate font-mono font-semibold">{objective || 'Lead Generation'}</div>
                     </div>
-                    <div className="bg-black/60 p-2.5 rounded border border-stone-800">
-                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Target Audience</div>
+
+                    <div className={`p-2.5 rounded border ${targetAudience.trim().length >= 5 ? 'bg-black/60 border-stone-800' : 'bg-red-950/20 border-red-500/40'}`}>
+                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5 flex items-center justify-between">
+                        <span>Target Audience</span>
+                        {targetAudience.trim().length < 5 && <AlertCircle className="w-3 h-3 text-red-400" />}
+                      </div>
                       <div className="text-stone-200 truncate font-mono font-semibold">{targetAudience || 'Not specified'}</div>
                     </div>
-                    <div className="bg-black/60 p-2.5 rounded border border-stone-800">
-                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5">Master Headline & CTA</div>
-                      <div className="text-stone-200 truncate font-mono font-semibold">{headline || callToAction ? `${headline || 'No Headline'} (${callToAction})` : 'Not specified'}</div>
+
+                    <div className={`p-2.5 rounded border ${headline.length <= 30 && headline.trim() ? 'bg-black/60 border-stone-800' : 'bg-amber-950/30 border-amber-500/40'}`}>
+                      <div className="text-[9px] uppercase text-stone-400 font-bold mb-0.5 flex items-center justify-between">
+                        <span>Headline Length</span>
+                        <span className={headline.length > 30 ? 'text-red-400 font-bold' : 'text-stone-400'}>{headline.length}/30</span>
+                      </div>
+                      <div className="text-stone-200 truncate font-mono font-semibold">{headline || 'No Headline'}</div>
                     </div>
                   </div>
+
+                  {/* Real-Time Channel Constraint Errors / Warnings Box */}
+                  {channelValidationErrors.length > 0 ? (
+                    <div className="bg-red-950/30 border border-red-500/40 rounded p-3 space-y-2">
+                      <div className="flex items-center justify-between border-b border-red-500/20 pb-1.5">
+                        <div className="flex items-center gap-1.5 text-red-400 text-xs font-bold uppercase tracking-wider">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span>Real-Time Channel Constraint Violations ({channelValidationErrors.length})</span>
+                        </div>
+                        <span className="text-[10px] text-stone-400 font-mono">
+                          {channelValidationErrors.filter(e => e.type === 'char_limit').length} Char Limits • {channelValidationErrors.filter(e => e.type === 'aspect_ratio').length} Aspect Ratios
+                        </span>
+                      </div>
+
+                      <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                        {channelValidationErrors.map((err, idx) => (
+                          <div key={`channel-val-err-${err.type || 'type'}-${idx}`} className="flex items-start gap-2 text-[11px] bg-black/50 p-2 rounded border border-stone-800">
+                            {err.severity === 'error' ? (
+                              <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                            ) : (
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                            )}
+                            <div className="flex-1">
+                              <span className={`font-bold mr-1.5 ${err.severity === 'error' ? 'text-red-300' : 'text-amber-300'}`}>
+                                [{err.type === 'char_limit' ? 'Character Limit' : err.type === 'aspect_ratio' ? 'Aspect Ratio' : 'Required Field'}]:
+                              </span>
+                              <span className="text-stone-200">{err.message}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-[11px] text-emerald-300 bg-emerald-950/20 p-2.5 rounded border border-emerald-500/30 font-medium">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>All channel constraints (Google RSA limits, character caps, and active platform aspect ratios) passed real-time audit. Safe for Gemini context generation.</span>
+                    </div>
+                  )}
 
                   {!isContextVerified && (
                     <div className="flex items-center gap-1.5 text-[11px] text-amber-300 bg-amber-400/10 p-2 rounded border border-amber-400/20">
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Please check "Verify & Lock Campaign Scope" above to confirm context before generating RSA copy.</span>
+                      <span>Please check "Verify & Lock Scope" above to acknowledge and confirm campaign context before AI copy generation.</span>
                     </div>
                   )}
                 </div>
@@ -2943,7 +3422,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
               {apiVerificationLog.length > 0 && (
                 <div className="bg-black border border-stone-800 p-3 rounded text-[11px] font-mono text-emerald-400 space-y-1 max-h-32 overflow-y-auto">
                   {apiVerificationLog.map((log, i) => (
-                    <div key={i}>{log}</div>
+                    <div key={`handshake-log-${i}-${log.slice(0, 15)}`}>{log}</div>
                   ))}
                 </div>
               )}
@@ -3098,7 +3577,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                     </div>
                     <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                       {validationResult.errors.map((err, idx) => (
-                        <div key={idx} className="bg-stone-950 p-2 rounded border border-stone-900 flex items-center justify-between gap-2">
+                        <div key={`validation-err-${err.field || 'field'}-${idx}`} className="bg-stone-950 p-2 rounded border border-stone-900 flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-red-400 font-bold">●</span>
                             <div>
@@ -3186,17 +3665,29 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
           {/* Modal Footer Controls */}
           <div className="px-5 py-4 border-t border-stone-800 bg-[#050505] flex items-center justify-between font-mono text-xs">
-            {step > 1 ? (
+            <div className="flex items-center gap-2">
+              {step > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setStep((step - 1) as any)}
+                  className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-stone-300 font-bold uppercase rounded cursor-pointer"
+                >
+                  Back
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setStep((step - 1) as any)}
-                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-stone-300 font-bold uppercase rounded cursor-pointer"
+                onClick={() => {
+                  loadAllDrafts();
+                  setShowDraftsDrawer(true);
+                }}
+                className="px-3 py-2 bg-stone-900 hover:bg-stone-800 border border-stone-700 hover:border-amber-400 text-amber-400 font-bold text-xs rounded cursor-pointer flex items-center gap-1.5 transition-colors"
+                title="View and restore saved campaign drafts from Firestore"
               >
-                Back
+                <Layers className="w-3.5 h-3.5" />
+                <span>View Saved Drafts ({allSavedDrafts.length})</span>
               </button>
-            ) : (
-              <div></div>
-            )}
+            </div>
 
             {step < 4 ? (
               <button
@@ -3247,6 +3738,255 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Saved Campaign Drafts Management Drawer / Overlay */}
+      {showDraftsDrawer && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-stone-900 border border-amber-500/40 rounded-lg max-w-2xl w-full p-5 space-y-4 font-mono shadow-2xl">
+            <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Saved Campaign Drafts & Auto-Save History
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDraftsDrawer(false)}
+                className="text-stone-400 hover:text-white p-1 rounded transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-300 leading-relaxed">
+              Campaign configurations auto-save to localStorage and Firestore every 30 seconds. Select and resume any draft below to continue configuration without cluttering your main campaign dashboard.
+            </p>
+
+            {allSavedDrafts.length === 0 ? (
+              <div className="bg-black/40 border border-stone-800 p-8 rounded text-center text-stone-400 text-xs">
+                No saved drafts found. Edits made in the wizard automatically save here every 30 seconds.
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto space-y-2.5 pr-1">
+                {allSavedDrafts.map((draft, i) => {
+                  const d = draft.stepData || {};
+                  const channels = Array.isArray(d.selectedChannels) ? d.selectedChannels.filter((c: any) => c.enabled) : [];
+                  return (
+                    <div
+                      key={`saved-draft-item-${draft.id || 'draft'}-${i}-${draft.updatedAt || ''}`}
+                      className="bg-stone-950 border border-stone-800 hover:border-amber-400/50 p-3.5 rounded-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-colors"
+                    >
+                      <div className="space-y-1 flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-amber-300 text-xs truncate">
+                            {d.name || 'Untitled Draft'}
+                          </span>
+                          <span className="bg-stone-900 border border-stone-700 text-stone-300 text-[10px] px-2 py-0.5 rounded">
+                            {draft.lastSavedStepName || `Step ${draft.step || 1}`}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-stone-400 flex items-center gap-3 flex-wrap">
+                          <span>Objective: <strong className="text-stone-200">{d.objective || 'Lead Generation'}</strong></span>
+                          <span>Budget: <strong className="text-emerald-400">${(d.totalBudget || 0).toLocaleString()}</strong></span>
+                          <span>Channels: <strong className="text-amber-400">{channels.length} Active</strong></span>
+                        </div>
+                        <div className="text-[10px] text-stone-500">
+                          Last modified: {draft.updatedAt ? new Date(draft.updatedAt).toLocaleString() : 'Recently'}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        <button
+                          type="button"
+                          onClick={() => handleApplyDraft(draft)}
+                          className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-bold rounded flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Resume</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDraft(draft.id)}
+                          className="p-1.5 text-stone-400 hover:text-red-400 bg-stone-900 hover:bg-stone-800 rounded border border-stone-800 transition-colors cursor-pointer"
+                          title="Delete this draft"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-stone-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  handleClearActiveDraft();
+                  setName('New Omnichannel Campaign');
+                  setShowDraftsDrawer(false);
+                  setStep(1);
+                }}
+                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold rounded transition-colors cursor-pointer"
+              >
+                Start New Blank Campaign
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDraftsDrawer(false)}
+                className="px-4 py-1.5 bg-stone-950 border border-stone-700 hover:border-amber-400 text-stone-300 text-xs font-semibold rounded transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Onboarding Tutorial Overlay */}
+      {showOnboardingTour && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-stone-900 border-2 border-amber-500/60 rounded-xl max-w-xl w-full p-6 space-y-5 font-mono shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-stone-800">
+              <div 
+                className="h-full bg-amber-400 transition-all duration-300"
+                style={{ width: `${((tourStepIndex + 1) / ONBOARDING_TOUR_STEPS.length) * 100}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between border-b border-stone-800 pb-3 pt-1">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-400 shrink-0 animate-pulse" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Interactive AI Optimization Tour ({tourStepIndex + 1}/{ONBOARDING_TOUR_STEPS.length})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  try { localStorage.setItem('vantage_wizard_onboarding_completed', 'true'); } catch (e) {}
+                  setShowOnboardingTour(false);
+                }}
+                className="text-stone-400 hover:text-white p-1 rounded transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Step Progress Pills */}
+            <div className="grid grid-cols-4 gap-1.5">
+              {ONBOARDING_TOUR_STEPS.map((s, idx) => (
+                <button
+                  key={`tour-pill-${idx}`}
+                  type="button"
+                  onClick={() => {
+                    setTourStepIndex(idx);
+                    setStep(s.wizardStep as any);
+                  }}
+                  className={`py-1.5 px-2 rounded text-[10px] font-bold transition-all text-center border cursor-pointer ${
+                    tourStepIndex === idx
+                      ? 'bg-amber-400 text-stone-950 border-amber-400 shadow'
+                      : idx < tourStepIndex
+                      ? 'bg-amber-400/20 text-amber-300 border-amber-400/40'
+                      : 'bg-stone-950 text-stone-500 border-stone-800 hover:text-stone-300'
+                  }`}
+                >
+                  Step {idx + 1}
+                </button>
+              ))}
+            </div>
+
+            {/* Tour Step Card Details */}
+            <div className="bg-black/60 border border-stone-800 p-4 rounded-lg space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                  {ONBOARDING_TOUR_STEPS[tourStepIndex].badge}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setStep(ONBOARDING_TOUR_STEPS[tourStepIndex].wizardStep as any)}
+                  className="text-[10px] bg-stone-800 hover:bg-stone-700 text-stone-300 px-2.5 py-1 rounded border border-stone-700 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <ArrowRight className="w-3 h-3 text-amber-400" />
+                  <span>Preview Wizard Step {ONBOARDING_TOUR_STEPS[tourStepIndex].wizardStep}</span>
+                </button>
+              </div>
+
+              <h4 className="text-sm font-bold text-white">
+                {ONBOARDING_TOUR_STEPS[tourStepIndex].title}
+              </h4>
+
+              <p className="text-xs text-stone-300 leading-relaxed">
+                {ONBOARDING_TOUR_STEPS[tourStepIndex].description}
+              </p>
+
+              <div className="bg-amber-950/30 border border-amber-500/30 p-2.5 rounded text-[11px] text-amber-200/90 flex items-start gap-2">
+                <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>{ONBOARDING_TOUR_STEPS[tourStepIndex].proTip}</span>
+              </div>
+            </div>
+
+            {/* Navigation Buttons */}
+            <div className="pt-2 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  try { localStorage.setItem('vantage_wizard_onboarding_completed', 'true'); } catch (e) {}
+                  setShowOnboardingTour(false);
+                }}
+                className="text-xs text-stone-400 hover:text-stone-200 transition-colors underline cursor-pointer"
+              >
+                Skip Tutorial
+              </button>
+
+              <div className="flex items-center gap-2">
+                {tourStepIndex > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const prevIdx = tourStepIndex - 1;
+                      setTourStepIndex(prevIdx);
+                      setStep(ONBOARDING_TOUR_STEPS[prevIdx].wizardStep as any);
+                    }}
+                    className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-bold rounded transition-colors cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                )}
+
+                {tourStepIndex < ONBOARDING_TOUR_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextIdx = tourStepIndex + 1;
+                      setTourStepIndex(nextIdx);
+                      setStep(ONBOARDING_TOUR_STEPS[nextIdx].wizardStep as any);
+                    }}
+                    className="px-4 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-bold rounded transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <span>Next Step</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try { localStorage.setItem('vantage_wizard_onboarding_completed', 'true'); } catch (e) {}
+                      setShowOnboardingTour(false);
+                    }}
+                    className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-stone-950 text-xs font-bold rounded transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Got It, Start Building!</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

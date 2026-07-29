@@ -817,4 +817,14 @@ export const deleteWizardDraftFromFirestore = async (orgId: string, draftId = 'a
   }
 };
 
+export const listWizardDraftsFromFirestore = async (orgId: string): Promise<WizardDraft[]> => {
+  try {
+    const snap = await getDocs(collection(db, `organizations/${orgId}/wizardDrafts`));
+    return snap.docs.map(d => d.data() as WizardDraft);
+  } catch (error) {
+    console.warn(`Error listing wizard drafts from Firestore:`, error);
+    return [];
+  }
+};
+
 

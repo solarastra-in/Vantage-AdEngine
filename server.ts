@@ -1113,22 +1113,37 @@ app.post('/api/invoices/:id/pay', (req, res) => {
 // 6. Gemini AI Optimization API
 app.post('/api/ai/optimize', async (req, res) => {
   try {
-    const { campaignName, objective, targetAudience, currentHeadline, currentBody, channels: selectedChannels } = req.body;
+    const { 
+      campaignName, 
+      objective, 
+      targetAudience, 
+      currentHeadline, 
+      currentBody, 
+      channels: selectedChannels, 
+      metadata, 
+      channelConstraints, 
+      instructions 
+    } = req.body;
+
     const ai = getGenAI();
 
     if (!ai) {
-      // Fallback response if GEMINI_API_KEY is not set
+      // Fallback response if GEMINI_API_KEY is not set (strictly complying with character limits)
+      const cleanHeadlineName = (campaignName || 'Campaign').length > 15 
+        ? (campaignName || 'Campaign').slice(0, 15) 
+        : (campaignName || 'Campaign');
+
       return res.json({
         improvedHeadlines: [
-          `Scale ${campaignName} Across All Digital Channels instantly`,
-          `AI-Optimized ${objective || 'Campaign'} with 4.2x Guaranteed ROAS`,
-          `Reach ${targetAudience || 'Key Decision Makers'} in One Click`,
+          `Scale ${cleanHeadlineName} Today`,
+          `AI 4.2x ROAS Optimization`,
+          `Reach ${targetAudience ? targetAudience.slice(0, 12) : 'Key Buyers'} Fast`,
         ],
         improvedPrimaryText: [
-          `Supercharge your digital presence across Meta, Google, LinkedIn, and TikTok with automated budget balancing and real-time conversion tracking.`,
-          `Experience single-pane advertising control. Launch, optimize, and monetize your campaigns seamlessly.`,
+          `Automate ads on Meta, Google & LinkedIn with real-time ROAS tracking and budget balancing.`,
+          `Single-pane ad management: launch, optimize, and scale campaigns effortlessly across channels.`,
         ],
-        suggestedTargeting: `High-intent digital buyers, lookalike audience 1% matched on past converters, retargeted leads from all channels.`,
+        suggestedTargeting: `High-intent B2B tech decision makers, lookalike audience 1% matched on past converters, retargeted leads from active ad channels.`,
         recommendedBudgetDistribution: [
           { platform: 'Google Ads', percent: 40, reason: 'Highest conversion intent and search volume.' },
           { platform: 'Meta Suite', percent: 30, reason: 'Optimal visual engagement and retargeting reach.' },
@@ -1139,22 +1154,32 @@ app.post('/api/ai/optimize', async (req, res) => {
       });
     }
 
-    const prompt = `You are a high-performance digital advertising growth executive and AI media planner. 
-Analyze and generate optimized copy, targeting, and budget allocations for the following ad campaign:
+    const prompt = `You are an elite digital advertising executive, growth engineer, and AI media planner. 
+Analyze and generate optimized copy, targeting, and budget allocations for the following ad campaign scope:
 
-Campaign Name: ${campaignName || 'Digital Ad Campaign'}
-Objective: ${objective || 'Lead Generation'}
-Target Audience: ${targetAudience || 'Tech Decision Makers'}
-Current Headline: ${currentHeadline || 'Default Headline'}
-Current Primary Text: ${currentBody || 'Default Primary Text'}
-Selected Channels: ${JSON.stringify(selectedChannels || [])}
+CAMPAIGN SCOPE & METADATA:
+- Campaign Name: ${campaignName || 'Digital Ad Campaign'}
+- Objective: ${objective || 'Lead Generation'}
+- Target Audience Persona: ${targetAudience || 'Tech Decision Makers'}
+- Current Master Headline: ${currentHeadline || 'Default Headline'}
+- Current Primary Body Text: ${currentBody || 'Default Primary Text'}
+- Active Target Channels: ${JSON.stringify(selectedChannels || [])}
+${metadata ? `- Additional Metadata: ${JSON.stringify(metadata)}` : ''}
+
+CHANNEL-SPECIFIC CONSTRAINTS & SPECIFICATIONS:
+${channelConstraints ? JSON.stringify(channelConstraints, null, 2) : '- Google Ads: Headlines <= 30 chars, RSA Descriptions <= 90 chars\n- Meta Ads: Headlines <= 40 chars, Primary Text <= 125 chars\n- LinkedIn Ads: Headlines <= 70 chars, Body Text <= 150 chars'}
+
+EXPLICIT QUALITY & SPECIFICATION INSTRUCTIONS:
+${instructions || 'All generated headlines MUST be 30 characters or fewer for strict Google Ads compliance. All primary texts MUST be 90 characters or fewer for Google RSA/Meta compliance.'}
+
+Ensure every string generated strictly aligns with the campaign objective (${objective || 'Lead Generation'}) and target audience (${targetAudience || 'Tech Decision Makers'}).
 
 Provide your response in JSON format strictly matching this schema:
-- improvedHeadlines: array of 3 high-CTR catchy headlines
-- improvedPrimaryText: array of 2 high-converting body texts
-- suggestedTargeting: detailed targeting recommendations
+- improvedHeadlines: array of 3 high-CTR catchy headlines (CRITICAL: each headline MUST be 30 characters or fewer)
+- improvedPrimaryText: array of 2 high-converting body texts (CRITICAL: each body text MUST be 90 characters or fewer)
+- suggestedTargeting: detailed targeting recommendations based on the target audience
 - recommendedBudgetDistribution: array of objects with platform, percent (summing to 100), and reason
-- diagnosticReport: a concise 2-sentence performance forecast and optimization strategy.`;
+- diagnosticReport: a concise 2-sentence performance forecast and channel optimization strategy.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
