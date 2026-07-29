@@ -86,6 +86,29 @@ describe('live adapters: real call construction when credential IS present (fetc
     expect(result.externalId).toBe('customers/8832011/campaigns/111');
   });
 
+  test('google adapter normalizes a dash-formatted customer ID (e.g. "514-401-5092") before building the API URL -- Google Ads rejects dashes', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ results: [{ resourceName: 'customers/5144015092/campaigns/999' }] }),
+    } as Response);
+
+    await googleAdapter.publish(validPayload, {
+      accountId: '514-401-5092',
+      secret: 'oauth_token',
+      extra: { developerToken: 'dev_tok_123' },
+    });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toContain('customers/5144015092/campaigns:mutate');
+    expect(url).not.toContain('514-401-5092');
+  });
+
+  test('google adapter rejects an account ID that normalizes to nothing (no digits at all)', async () => {
+    await expect(
+      googleAdapter.publish(validPayload, { accountId: 'abc-def', secret: 'oauth_token', extra: { developerToken: 'dev_tok' } })
+    ).rejects.toThrow(/doesn't contain any digits/);
+  });
+
   test('tiktok adapter treats a non-zero response code as an error even when HTTP status is 200', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,

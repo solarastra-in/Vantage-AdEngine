@@ -9,13 +9,31 @@ import { dryRunResult, dryRunPerformance, callPlatformApi } from './dryRun';
 
 const API_VERSION = 'v16';
 
+/**
+ * Google Ads customer IDs are shown everywhere in Google's own UI (and
+ * naturally get typed into a credential form) as dash-formatted, e.g.
+ * "514-401-5092" -- but the Ads API requires the plain 10-digit numeric ID
+ * with no dashes in every URL path and resource name. Sending the
+ * dash-formatted version through unmodified makes every real API call
+ * fail with a 400 (customer ID not found / invalid argument), silently if
+ * nothing surfaces that specific error clearly. Every use of accountId in
+ * this adapter goes through this first.
+ */
+function normalizeCustomerId(accountId: string): string {
+  return accountId.replace(/[^0-9]/g, '');
+}
+
 export const googleAdapter: PlatformAdapter = {
   platform: 'google',
 
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
     if (!credential) return dryRunResult('google', payload);
 
-    const { accountId, secret, extra } = credential;
+    const { secret, extra } = credential;
+    const accountId = normalizeCustomerId(credential.accountId);
+    if (!accountId) {
+      throw new Error(`Google Ads customer ID "${credential.accountId}" doesn't contain any digits after normalization -- check the account ID entered in API Nexus.`);
+    }
     const developerToken = extra?.developerToken;
     if (!developerToken) {
       throw new Error('Google Ads requires a developer token in addition to the OAuth2 access token.');
@@ -31,7 +49,7 @@ export const googleAdapter: PlatformAdapter = {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${secret}`,
           'developer-token': developerToken,
-          ...(extra?.loginCustomerId ? { 'login-customer-id': extra.loginCustomerId } : {}),
+          ...(extra?.loginCustomerId ? { 'login-customer-id': normalizeCustomerId(extra.loginCustomerId) } : {}),
         },
         body: JSON.stringify({
           operations: [
@@ -57,7 +75,8 @@ export const googleAdapter: PlatformAdapter = {
 
   async rollback(externalId: string, credential: ResolvedCredential | null) {
     if (!credential) return;
-    const { accountId, secret, extra } = credential;
+    const { secret, extra } = credential;
+    const accountId = normalizeCustomerId(credential.accountId);
     const url = `https://googleads.googleapis.com/${API_VERSION}/customers/${accountId}/campaigns:mutate`;
     await callPlatformApi(
       url,
@@ -77,7 +96,8 @@ export const googleAdapter: PlatformAdapter = {
   async fetchPerformance(externalId, credential, dateRange) {
     if (!credential) return dryRunPerformance('google', externalId, dateRange);
 
-    const { accountId, secret, extra } = credential;
+    const { secret, extra } = credential;
+    const accountId = normalizeCustomerId(credential.accountId);
     const url = `https://googleads.googleapis.com/${API_VERSION}/customers/${accountId}/googleAds:search`;
 
     // externalId here is the full resource_name (customers/{id}/campaigns/{campaignId});

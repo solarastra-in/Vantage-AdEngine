@@ -248,13 +248,25 @@ export function App() {
         // Persist invoice to Firestore
         await saveInvoiceToFirestore(currentOrgId, data.invoice);
       }
+
+      // Campaign creation and publishing are genuinely separate server
+      // calls now (see the comment on POST /api/campaigns in server.ts for
+      // why: this used to be a fake setTimeout that always "succeeded"
+      // without ever calling a real platform). If the wizard's "Publish
+      // Now" toggle was on, actually invoke the real publish pipeline here
+      // -- passing the just-created campaign directly, since React state
+      // from setCampaigns above isn't guaranteed to be visible yet in this
+      // same call stack.
+      if (data.publishRequested && data.campaign) {
+        await handlePublishCampaign(data.campaign.id, data.campaign);
+      }
     } catch (err) {
       console.error('Create campaign error:', err);
     }
   };
 
   // Single-Click Cross-Platform API Dispatch
-  const handlePublishCampaign = async (campaignId: string) => {
+  const handlePublishCampaign = async (campaignId: string, campaignOverride?: Campaign) => {
     try {
       setCampaigns(prev =>
         prev.map(c =>
@@ -280,7 +292,7 @@ export function App() {
         setActiveDispatchReport(data.dispatchReport as DispatchReportUI);
       }
 
-      const targetCmp = campaigns.find(c => c.id === campaignId);
+      const targetCmp = campaignOverride ?? campaigns.find(c => c.id === campaignId);
       if (targetCmp) {
         const updatedCampaignToSave: Campaign = {
           ...targetCmp,

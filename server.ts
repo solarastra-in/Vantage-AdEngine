@@ -124,7 +124,7 @@ app.post('/api/campaigns', (req, res) => {
     orgId,
     name: body.name || 'Untitled Campaign',
     objective: body.objective || 'Lead Generation',
-    status: body.publishNow ? 'publishing' : 'draft',
+    status: 'draft',
     totalBudget: Number(body.totalBudget) || 10000,
     spentBudget: 0,
     startDate: body.startDate || new Date().toISOString().split('T')[0],
@@ -136,10 +136,11 @@ app.post('/api/campaigns', (req, res) => {
       callToAction: 'Learn More',
       mediaUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=800&q=80',
     },
+    platformCreatives: body.platformCreatives || undefined,
     channels: body.channels || [],
     publishStatuses: (body.channels || []).map((ch: any) => ({
       platform: ch.platform,
-      status: body.publishNow ? 'publishing' : 'draft',
+      status: 'draft',
     })),
     metrics: {
       impressions: 0,
@@ -181,23 +182,17 @@ app.post('/api/campaigns', (req, res) => {
   };
   invoices.unshift(newInvoice);
 
-  // If publishNow was selected, simulate cross-platform publishing
-  if (body.publishNow) {
-    setTimeout(() => {
-      const cmp = campaigns.find(c => c.id === newCampaign.id);
-      if (cmp) {
-        cmp.status = 'active';
-        cmp.publishStatuses = cmp.channels.map(ch => ({
-          platform: ch.platform,
-          status: 'live',
-          externalId: `${ch.platform}_ad_${Math.floor(100000 + Math.random() * 900000)}`,
-          publishedAt: new Date().toISOString(),
-        }));
-      }
-    }, 1500);
-  }
-
-  res.status(201).json({ campaign: newCampaign, invoice: newInvoice });
+  // NOTE: this endpoint used to have its own fake "simulate cross-platform
+  // publishing" block here -- a setTimeout that unconditionally marked
+  // every channel 'live' with a fabricated externalId
+  // (`${platform}_ad_${random 6-digit number}`) after 1.5 seconds, with no
+  // real API call to any platform and no possible failure path.
+  // Campaign creation and publishing are now genuinely two separate steps.
+  // If the client set publishNow, it calls the real publish endpoint
+  // immediately after this call succeeds (see handleCreateCampaign in
+  // App.tsx) -- that endpoint actually resolves credentials from the vault
+  // and calls each platform's real adapter.
+  res.status(201).json({ campaign: newCampaign, invoice: newInvoice, publishRequested: !!body.publishNow });
 });
 
 app.put('/api/campaigns/:id', (req, res) => {
@@ -1221,6 +1216,13 @@ Provide your response in JSON format strictly matching this schema:
     const parsed = JSON.parse(jsonText);
     res.json(parsed);
   } catch (error: any) {
+    if (error.status === 429 || error.message?.includes('429') || error.message?.includes('RESOURCE_EXHAUSTED')) {
+      console.log(`[AI Optimization] Gemini API quota reached (429). Returning 429 rate limit response to client.`);
+      return res.status(429).json({
+        error: 'AI rate limit reached',
+        details: 'Gemini API quota temporarily exceeded. Please try again in a few moments.',
+      });
+    }
     console.error('Gemini AI Optimization Error:', error);
     res.status(500).json({
       error: 'AI optimization failed',
@@ -1230,99 +1232,93 @@ Provide your response in JSON format strictly matching this schema:
 });
 
 // 7. Channel-Specific AI Creative Generator
-app.post('/api/ai/generate-channel-creative', async (req, res) => {
+app.post('/api/ai/generate-channel-creative', withValidation(async (req, res) => {
+  const body = req.body ?? {};
+  const platform = requireString(body.platform, 'platform') as PlatformType;
+  const businessName = (body.businessName || body.productName || 'Your Business') as string;
+  const targetAudience = body.targetAudience as string | undefined;
+  const objective = body.objective as string | undefined;
+  const masterHeadline = body.masterHeadline as string | undefined;
+  const masterPrimaryText = body.masterPrimaryText as string | undefined;
+
+  const specs: Record<string, { headlineLimit: number; descLimit: number; label: string }> = {
+    meta: { headlineLimit: 40, descLimit: 125, label: 'Meta (Facebook/Instagram) Feed & Reels' },
+    google: { headlineLimit: 30, descLimit: 90, label: 'Google Ads Responsive Search' },
+    linkedin: { headlineLimit: 70, descLimit: 150, label: 'LinkedIn Sponsored Content' },
+    tiktok: { headlineLimit: 40, descLimit: 100, label: 'TikTok In-Feed Ad' },
+    pinterest: { headlineLimit: 100, descLimit: 500, label: 'Pinterest Standard Pin' },
+    x: { headlineLimit: 280, descLimit: 280, label: 'X (Twitter) Promoted Post' },
+    programmatic: { headlineLimit: 35, descLimit: 80, label: 'Programmatic DSP Banner' },
+  };
+  const spec = specs[platform] ?? specs.meta;
+
+  const safeTruncate = (s: string, max: number) => {
+    if (!s || s.length <= max) return s || '';
+    const cut = s.slice(0, max);
+    const lastSpace = cut.lastIndexOf(' ');
+    return (lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).trim();
+  };
+
+  const ai = getGenAI();
+  if (!ai) {
+    return res.json({
+      platform,
+      headline: safeTruncate(masterHeadline || businessName, spec.headlineLimit),
+      primaryText: safeTruncate(masterPrimaryText || `${businessName} -- ${objective || 'learn more'}.`, spec.descLimit),
+      source: 'fallback_truncation',
+    });
+  }
+
   try {
-    const { platform, productName, targetAudience, objective } = req.body;
-    const ai = getGenAI();
+    const prompt = `You are an advertising copywriter. Write ONE ad headline and ONE primary body text for ${spec.label}, for this specific business and campaign -- do not write about anything else:
 
-    if (!ai) {
-      // High quality fallback responses customized per platform specs
-      const defaultCreatives: Record<string, any> = {
-        meta: {
-          platform: 'meta',
-          headline: `Transform ${productName || 'Your Business'} in Seconds`,
-          primaryText: `Scale your conversions effortlessly. Single-click setup, automated targeting, and real-time ROAS tracking.`,
-          callToAction: 'Learn More',
-          charCountHeadline: 38,
-          charCountPrimary: 112,
-          aspectRatio: '1:1 Square (1080x1080) & 9:16 Reels',
-          suggestedFormat: 'Carousel Ad with Interactive CTA',
-        },
-        google: {
-          platform: 'google',
-          headlines: [
-            `Top ${productName || 'Software'} Solution`,
-            'Automate Spend & ROAS 4.2x',
-            'Get 14-Day Free Trial',
-          ],
-          descriptions: [
-            `Maximize digital revenue with single-click multi-channel publishing. Try it today!`,
-            `The preferred ad automation engine for tech scaleups & agencies. Free onboarding call.`,
-          ],
-          aspectRatio: 'Responsive Search & 1200x628 Landscape Display',
-          suggestedFormat: 'Performance Max & Dynamic Search Ads',
-        },
-        linkedin: {
-          platform: 'linkedin',
-          headline: `Enterprise ${productName || 'Ad Engine'} for Growth Leaders`,
-          primaryText: `Empower your marketing team with multi-tenant workspace management, real-time campaign auditing, and automated financial ledgers.`,
-          callToAction: 'Request Enterprise Demo',
-          charCountHeadline: 52,
-          charCountPrimary: 142,
-          aspectRatio: '1.91:1 Landscape (1200x627)',
-          suggestedFormat: 'Sponsored InMail & Single Image Lead Gen Form',
-        },
-        tiktok: {
-          platform: 'tiktok',
-          scriptHook: `Stop wasting money on fragmented ad accounts! Here is how we scaled our ROAS in 3 clicks...`,
-          caption: `Elevate your campaigns with AI automation! 🚀 #TechTok #MarketingHacks #GrowthStrategy`,
-          callToAction: 'Download App',
-          aspectRatio: '9:16 Vertical Video (1080x1920)',
-          suggestedFormat: 'Spark Ad Native UGC Video',
-        },
-        pinterest: {
-          platform: 'pinterest',
-          title: `Ultimate ${productName || 'Marketing'} Workflow Guide`,
-          description: `Discover how leading brands organize multi-platform campaigns with seamless design templates and real-time analytics.`,
-          callToAction: 'Visit Site',
-          aspectRatio: '2:3 Vertical Pin (1000x1500)',
-          suggestedFormat: 'Standard Idea Pin',
-        },
-        x: {
-          platform: 'x',
-          tweetText: `Tired of switching between 7 ad managers? ${productName || 'Vantage AdEngine'} lets you launch Meta, Google, LinkedIn & TikTok from one dashboard. ⚡️`,
-          cardHeadline: 'Streamline Your Omnichannel Strategy',
-          callToAction: 'Try Free Now',
-          aspectRatio: '16:9 Promoted Card (1200x675)',
-          suggestedFormat: 'Promoted Website Card',
-        },
-        programmatic: {
-          platform: 'programmatic',
-          headline: `Scale Real-Time Bidding with DSP OpenRTB`,
-          primaryText: `Direct access to 500+ premium SSP publishers with guaranteed bid floors and fraud protection.`,
-          callToAction: 'Launch Programmatic Campaign',
-          aspectRatio: 'IAB Standard Banners (728x90, 300x250, 160x600)',
-          suggestedFormat: 'High-Impact Display Banner',
-        },
-      };
+Business/Advertiser name: ${businessName}
+Campaign objective: ${objective || 'Lead Generation'}
+Target audience: ${targetAudience || 'General audience'}
+Existing master headline (adapt if provided): ${masterHeadline || '(none provided)'}
+Existing master body text (adapt if provided): ${masterPrimaryText || '(none provided)'}
 
-      return res.json(defaultCreatives[platform] || defaultCreatives.meta);
-    }
-
-    const prompt = `You are a creative advertising copywriter specializing in ${platform} ad specifications.
-Generate channel-compliant copy for ${productName || 'Vantage AdEngine'} targeting ${targetAudience || 'Growth Marketers'}.
-Return JSON matching the specific character limits and ad specs for ${platform}.`;
+Hard constraints: headline must be <= ${spec.headlineLimit} characters. Primary text must be <= ${spec.descLimit} characters. Return JSON with headline and primaryText fields.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
       contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            headline: { type: Type.STRING },
+            primaryText: { type: Type.STRING },
+          },
+          required: ['headline', 'primaryText'],
+        },
+      },
     });
 
-    res.json({ result: response.text });
+    const parsed = JSON.parse(response.text || '{}');
+    res.json({
+      platform,
+      headline: safeTruncate(parsed.headline || masterHeadline || businessName, spec.headlineLimit),
+      primaryText: safeTruncate(parsed.primaryText || masterPrimaryText || `${businessName} -- ${objective || 'learn more'}.`, spec.descLimit),
+      source: 'gemini',
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED');
+    if (isRateLimit) {
+      console.log(`[AI Refiner] Gemini API quota reached for ${platform} (429). Serving fallback creative.`);
+    } else {
+      console.error(`AI creative generation failed for ${platform}:`, err);
+    }
+    res.json({
+      platform,
+      headline: safeTruncate(masterHeadline || businessName, spec.headlineLimit),
+      primaryText: safeTruncate(masterPrimaryText || `${businessName} -- ${objective || 'learn more'}.`, spec.descLimit),
+      source: 'fallback_truncation',
+      errorNotice: isRateLimit ? 'Gemini API quota temporarily exceeded. Master copy adjusted to platform limits.' : err.message,
+    });
   }
-});
+}));
 
 // Real budget reallocation endpoint
 app.post('/api/budget/reallocate', (req, res) => {

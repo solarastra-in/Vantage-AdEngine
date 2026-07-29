@@ -266,7 +266,7 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
     }
   };
 
-  // Generate for all active platforms
+  // Generate for all active platforms sequentially with a small delay to avoid 429 quota bursts
   const handleRefineAllContent = async () => {
     setIsGenerating(true);
 
@@ -274,13 +274,14 @@ export const AiContentRefiner: React.FC<AiContentRefinerProps> = ({
       ? activePlatforms
       : (['google', 'meta', 'linkedin'] as PlatformType[]);
 
-    const results = await Promise.all(
-      platformsToProcess.map(async plat => [plat, await fetchVariationForPlatform(plat)] as const)
-    );
-
     const newVars: Record<PlatformType, PlatformVariation[]> = {} as any;
-    for (const [plat, vars] of results) {
+    for (let i = 0; i < platformsToProcess.length; i++) {
+      const plat = platformsToProcess[i];
+      const vars = await fetchVariationForPlatform(plat);
       newVars[plat] = vars;
+      if (i < platformsToProcess.length - 1) {
+        await new Promise(r => setTimeout(r, 120));
+      }
     }
 
     setVariations(newVars);
