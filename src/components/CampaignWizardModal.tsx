@@ -41,10 +41,10 @@ import {
   Info,
   Split
 } from 'lucide-react';
-import { PlatformType, ChannelCredentials, AbTestConfig, AbTestVariant } from '../types';
+import { PlatformType, ChannelCredentials, ChannelBudget, AbTestConfig, AbTestVariant } from '../types';
 import { 
   fetchChannelCredentialsFromFirestore, 
-  DEFAULT_CHANNEL_CREDENTIALS, 
+  EMPTY_CHANNEL_CREDENTIALS, 
   saveChannelCredentialsToFirestore,
   saveWizardDraftToFirestore,
   fetchWizardDraftFromFirestore,
@@ -73,8 +73,6 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   onOptimizeWithAi,
   initialAiData,
 }) => {
-  if (!isOpen) return null;
-
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAiOptimizing, setIsAiOptimizing] = useState(false);
@@ -195,20 +193,14 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   });
 
   // STEP 2: Selected Channels & Channel Parameters
-  const [selectedChannels, setSelectedChannels] = useState<{
-    platform: PlatformType;
-    platformName: string;
-    budget: number;
-    enabled: boolean;
-    targeting: string;
-  }>([
-    { platform: 'meta', platformName: 'Meta Suite (FB/IG)', budget: 50000, enabled: true, targeting: 'Lookalike 1% Engaged Users' },
-    { platform: 'google', platformName: 'Google & YouTube Ads', budget: 60000, enabled: true, targeting: 'Intent Search & PMax' },
-    { platform: 'linkedin', platformName: 'LinkedIn Professional', budget: 25000, enabled: true, targeting: 'VPs & Directors' },
-    { platform: 'tiktok', platformName: 'TikTok Ads', budget: 15000, enabled: true, targeting: '#TechTok & Creators' },
-    { platform: 'pinterest', platformName: 'Pinterest Ads', budget: 0, enabled: false, targeting: 'Design & B2B Pins' },
-    { platform: 'x', platformName: 'X (Twitter) Ads', budget: 0, enabled: false, targeting: 'Followers of Tech Outlets' },
-    { platform: 'programmatic', platformName: 'Programmatic DSP', budget: 0, enabled: false, targeting: 'B2B Tech Sites' },
+  const [selectedChannels, setSelectedChannels] = useState<ChannelBudget[]>([
+    { platform: 'meta', platformName: 'Meta Suite (FB/IG)', budget: 50000, enabled: true, targeting: 'Lookalike 1% Engaged Users', startDate, endDate, adFormat: 'Feed + Stories' },
+    { platform: 'google', platformName: 'Google & YouTube Ads', budget: 60000, enabled: true, targeting: 'Intent Search & PMax', startDate, endDate, adFormat: 'Search RSA + Video' },
+    { platform: 'linkedin', platformName: 'LinkedIn Professional', budget: 25000, enabled: true, targeting: 'VPs & Directors', startDate, endDate, adFormat: 'Sponsored Content' },
+    { platform: 'tiktok', platformName: 'TikTok Ads', budget: 15000, enabled: true, targeting: '#TechTok & Creators', startDate, endDate, adFormat: 'In-Feed Video' },
+    { platform: 'pinterest', platformName: 'Pinterest Ads', budget: 0, enabled: false, targeting: 'Design & B2B Pins', startDate, endDate, adFormat: 'Standard Pin' },
+    { platform: 'x', platformName: 'X (Twitter) Ads', budget: 0, enabled: false, targeting: 'Followers of Tech Outlets', startDate, endDate, adFormat: 'Promoted Post' },
+    { platform: 'programmatic', platformName: 'Programmatic DSP', budget: 0, enabled: false, targeting: 'B2B Tech Sites', startDate, endDate, adFormat: 'Display Banner' },
   ]);
 
   // Real-Time Channel Constraints & Scope Audit Validation
@@ -473,7 +465,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   });
 
   // STEP 3: API Credentials loaded from Firestore
-  const [credentials, setCredentials] = useState<Record<string, ChannelCredentials>>(DEFAULT_CHANNEL_CREDENTIALS);
+  const [credentials, setCredentials] = useState<Record<string, ChannelCredentials>>(EMPTY_CHANNEL_CREDENTIALS);
   const [credentialValidationStates, setCredentialValidationStates] = useState<Record<string, 'VERIFIED' | 'PENDING' | 'MISSING'>>({
     meta: 'VERIFIED',
     google: 'VERIFIED',
@@ -1123,6 +1115,8 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     customerEmail,
   ]);
 
+  if (!isOpen) return null;
+
   const handleCredentialChange = (platform: PlatformType, field: keyof ChannelCredentials, value: any) => {
     setCredentials(prev => ({
       ...prev,
@@ -1653,7 +1647,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   // Helper to generate dynamic JSON payload per platform for Step 4 Preview & Google Ads API Full Coverage
   const getSynthesizedPayloadForPlatform = (plat: PlatformType) => {
     const ch = selectedChannels.find(c => c.platform === plat);
-    const cred = credentials[plat] || {};
+    const cred: Partial<ChannelCredentials> = credentials[plat] || {};
     const copy = platformCopy[plat] || { headline, primaryText, cta: callToAction };
 
     const abTestPayload = abTestConfig.enabled ? {

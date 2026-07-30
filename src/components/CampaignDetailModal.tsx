@@ -12,7 +12,8 @@ import {
   MousePointerClick, 
   DollarSign,
   Play,
-  Pause
+  Pause,
+  Trash2
 } from 'lucide-react';
 
 interface CampaignDetailModalProps {
@@ -20,6 +21,7 @@ interface CampaignDetailModalProps {
   onClose: () => void;
   onToggleStatus: (id: string) => void;
   onPublish: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
@@ -27,6 +29,7 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
   onClose,
   onToggleStatus,
   onPublish,
+  onDelete,
 }) => {
   if (!campaign) return null;
 
@@ -195,12 +198,29 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
             <span>Re-Publish Across All APIs</span>
           </button>
 
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-stone-900 border border-stone-700 text-stone-300 hover:text-white text-xs font-medium cursor-pointer"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-3">
+            {onDelete && (
+              <button
+                onClick={() => {
+                  if (window.confirm(`Are you sure you want to delete campaign "${campaign.name}"?`)) {
+                    onDelete(campaign.id);
+                    onClose();
+                  }
+                }}
+                className="px-4 py-2 bg-red-950/80 hover:bg-red-900 border border-red-700/80 text-red-200 text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 rounded-xs"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                <span>Delete Campaign</span>
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-stone-900 border border-stone-700 text-stone-300 hover:text-white text-xs font-medium cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
         </div>
 
       </div>

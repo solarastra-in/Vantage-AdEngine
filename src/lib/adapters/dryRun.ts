@@ -169,7 +169,14 @@ export async function callPlatformApi(
       return body;
     }
 
-    const detail = body?.error?.message || body?.error_description || body?.message || text || res.statusText;
+    let detail = body?.error?.message || body?.error_description || body?.message;
+    if (!detail) {
+      if (text && (text.trim().startsWith('<') || text.includes('<html') || text.includes('<!DOCTYPE'))) {
+        detail = `HTTP ${res.status} (${res.statusText || 'HTML Response'})`;
+      } else {
+        detail = (text && text.length < 300) ? text : (res.statusText || `HTTP ${res.status}`);
+      }
+    }
     const err = new RetryableApiError(
       `${platformLabel} API error (${res.status}): ${detail}`,
       parseRetryAfterMs(res.headers)

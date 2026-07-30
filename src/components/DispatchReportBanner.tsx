@@ -51,36 +51,43 @@ export const DispatchReportBanner: React.FC<{ report: DispatchReportUI; onDismis
         </button>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {report.results.map(r => (
-          <div key={r.platform} className="flex items-center justify-between gap-3 border-t border-stone-800/60 pt-1.5">
-            <span className="uppercase text-stone-400 font-bold">{r.platform}</span>
-            <div className="flex items-center gap-1.5">
-              {r.outcome === 'LIVE' && (
-                <span className={`flex items-center gap-1 ${r.mode === 'LIVE' ? 'text-emerald-400' : 'text-stone-400'}`}>
-                  <CheckCircle2 className="w-3 h-3" />
-                  {r.mode === 'LIVE' ? 'Live' : 'Dry-run OK'}
-                </span>
-              )}
-              {r.outcome === 'FAILED' && (
-                <span className="flex items-center gap-1 text-rose-400" title={r.error}>
-                  <XCircle className="w-3 h-3" />
-                  Failed
-                </span>
-              )}
-              {r.outcome === 'ROLLED_BACK' && (
-                <span className="flex items-center gap-1 text-amber-400" title="Rolled back because a sibling channel failed">
-                  <RotateCcw className="w-3 h-3" />
-                  Rolled back
-                </span>
-              )}
-              {r.outcome === 'SKIPPED_VALIDATION' && (
-                <span className="flex items-center gap-1 text-rose-300" title={r.error}>
-                  <AlertTriangle className="w-3 h-3" />
-                  Invalid
-                </span>
-              )}
+          <div key={r.platform} className="border-t border-stone-800/60 pt-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase text-stone-400 font-bold">{r.platform}</span>
+              <div className="flex items-center gap-1.5">
+                {r.outcome === 'LIVE' && (
+                  <span className={`flex items-center gap-1 ${r.mode === 'LIVE' ? 'text-emerald-400 font-semibold' : 'text-amber-400/90'}`}>
+                    <CheckCircle2 className="w-3 h-3" />
+                    {r.mode === 'LIVE' ? 'Live API Sent' : 'Dry-run OK'}
+                  </span>
+                )}
+                {r.outcome === 'FAILED' && (
+                  <span className="flex items-center gap-1 text-rose-400 font-semibold" title={r.error}>
+                    <XCircle className="w-3 h-3" />
+                    Failed
+                  </span>
+                )}
+                {r.outcome === 'ROLLED_BACK' && (
+                  <span className="flex items-center gap-1 text-amber-400" title="Rolled back because a sibling channel failed">
+                    <RotateCcw className="w-3 h-3" />
+                    Rolled back
+                  </span>
+                )}
+                {r.outcome === 'SKIPPED_VALIDATION' && (
+                  <span className="flex items-center gap-1 text-rose-300" title={r.error}>
+                    <AlertTriangle className="w-3 h-3" />
+                    Invalid
+                  </span>
+                )}
+              </div>
             </div>
+            {r.error && (
+              <p className="mt-1 text-[11px] text-rose-300/90 font-mono bg-rose-500/10 border border-rose-500/20 p-1.5 rounded-xs break-all leading-normal">
+                ⚠️ {r.error}
+              </p>
+            )}
           </div>
         ))}
       </div>

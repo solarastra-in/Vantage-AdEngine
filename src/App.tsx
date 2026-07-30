@@ -19,16 +19,15 @@ import { DispatchReportBanner, DispatchReportUI } from './components/DispatchRep
 import { Campaign, ChannelApiStatus, Invoice, InvoiceAuditLogEntry, PerformanceTimePoint, PlatformType } from './types';
 import { 
   Organization, 
-  INITIAL_ORGANIZATIONS, 
   fetchOrganizationsFromFirestore, 
   fetchCampaignsFromFirestore, 
   saveCampaignToFirestore, 
   deleteCampaignFromFirestore, 
+  bulkDeleteCampaignsFromFirestore,
   fetchInvoicesFromFirestore, 
   updateInvoiceStatusInFirestore,
   fetchChannelsFromFirestore,
   saveInvoiceToFirestore,
-  seedFirestoreIfEmpty,
   resolveAuthorizedOrgForUser,
   onboardNewOrganization,
   EmployeePermissions
@@ -41,7 +40,7 @@ export function App() {
   const [viewState, setViewState] = useState<'landing' | 'portal' | 'super-admin'>('landing');
 
   // Tenant Workspace State
-  const [organizations, setOrganizations] = useState<Organization[]>(INITIAL_ORGANIZATIONS);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<string>('org-astracloud');
   const [userRole, setUserRole] = useState<'SUPER_ADMIN' | 'TENANT_ADMIN' | 'TENANT_USER'>('TENANT_USER');
   const [userPermissions, setUserPermissions] = useState<EmployeePermissions | null>(null);
@@ -233,7 +232,7 @@ export function App() {
     try {
       const res = await fetch('/api/campaigns', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Org-Id': currentOrgId },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -381,6 +380,7 @@ export function App() {
         impressions: 0,
         clicks: 0,
         conversions: 0,
+        ctr: 0,
         cpc: 0,
         roas: 0,
       },
@@ -399,11 +399,16 @@ export function App() {
 
   // Delete Single Campaign
   const handleDeleteCampaign = async (campaignId: string) => {
+    if (!campaignId) return;
     setCampaigns(prev => prev.filter(c => c.id !== campaignId));
     if (selectedCampaign?.id === campaignId) {
       setSelectedCampaign(null);
     }
-    await deleteCampaignFromFirestore(currentOrgId, campaignId);
+    try {
+      await deleteCampaignFromFirestore(currentOrgId, campaignId);
+    } catch (err) {
+      console.error('Error deleting campaign from Firestore:', err);
+    }
     fetch(`/api/campaigns/${campaignId}`, {
       method: 'DELETE',
       headers: { 'X-Org-Id': currentOrgId },
@@ -412,17 +417,21 @@ export function App() {
 
   // Bulk Delete Campaigns
   const handleBulkDelete = async (campaignIds: string[]) => {
+    if (!campaignIds || campaignIds.length === 0) return;
     setCampaigns(prev => prev.filter(c => !campaignIds.includes(c.id)));
     if (selectedCampaign && campaignIds.includes(selectedCampaign.id)) {
       setSelectedCampaign(null);
     }
-    for (const id of campaignIds) {
-      await deleteCampaignFromFirestore(currentOrgId, id);
-      fetch(`/api/campaigns/${id}`, {
-        method: 'DELETE',
-        headers: { 'X-Org-Id': currentOrgId },
-      }).catch(() => {});
+    try {
+      await bulkDeleteCampaignsFromFirestore(currentOrgId, campaignIds);
+    } catch (err) {
+      console.error('Error bulk deleting campaigns from Firestore:', err);
     }
+    fetch('/api/campaigns/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Org-Id': currentOrgId },
+      body: JSON.stringify({ ids: campaignIds }),
+    }).catch(() => {});
   };
 
   // Test Channel API Gateway
@@ -577,6 +586,12 @@ Specifically:
   const totalSpend = campaigns.reduce((acc, c) => acc + c.spentBudget, 0);
   const activeNodesCount = channels.length;
 
+  // Tenant Organization helper variables
+  const currentOrg = organizations.find(o => o.id === currentOrgId) || organizations[0];
+  const isPendingApproval = currentOrg?.status === 'Pending Approval' && userRole !== 'SUPER_ADMIN';
+  const currentCurrency = currentOrg?.currency ?? 'USD';
+  const currentLocale = currentOrg?.locale ?? 'en-US';
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-stone-200 font-sans flex flex-col selection:bg-amber-400 selection:text-black">
       
@@ -684,111 +699,100 @@ Specifically:
 
             {/* Active Tab View */}
             <main className="flex-1">
-              {(() => {
-                const currentOrg = organizations.find(o => o.id === currentOrgId) || organizations[0];
-                const isPendingApproval = currentOrg?.status === 'Pending Approval' && userRole !== 'SUPER_ADMIN';
-                const currentCurrency = currentOrg?.currency ?? 'USD';
-                const currentLocale = currentOrg?.locale ?? 'en-US';
-
-                if (isPendingApproval) {
-                  return (
-                    <PendingApprovalView 
-                      organization={currentOrg} 
-                      currentUserEmail={currentUser?.email || undefined} 
+              {isPendingApproval ? (
+                <PendingApprovalView 
+                  organization={currentOrg} 
+                  currentUserEmail={currentUser?.email || undefined} 
+                />
+              ) : (
+                <>
+                  {activeTab === 'dashboard' && (
+                    <CommandCenter
+                      campaigns={campaigns}
+                      channels={channels}
+                      invoices={invoices}
+                      timeSeries={timeSeries}
+                      onOpenWizard={() => {
+                        setAiWizardInitialData(null);
+                        setIsWizardOpen(true);
+                      }}
+                      onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
+                      onSelectCampaign={(c) => setSelectedCampaign(c)}
+                      currency={currentCurrency}
+                      locale={currentLocale}
                     />
-                  );
-                }
+                  )}
 
-                return (
-                  <>
-                    {activeTab === 'dashboard' && (
-                      <CommandCenter
-                        campaigns={campaigns}
-                        channels={channels}
-                        invoices={invoices}
-                        timeSeries={timeSeries}
-                        onOpenWizard={() => {
-                          setAiWizardInitialData(null);
-                          setIsWizardOpen(true);
-                        }}
-                        onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
-                        onSelectCampaign={(c) => setSelectedCampaign(c)}
-                        currency={currentCurrency}
-                        locale={currentLocale}
-                      />
-                    )}
+                  {activeTab === 'campaigns' && (
+                    <CampaignManager
+                      campaigns={campaigns}
+                      onOpenWizard={() => {
+                        setAiWizardInitialData(null);
+                        setIsWizardOpen(true);
+                      }}
+                      onSelectCampaign={(c) => setSelectedCampaign(c)}
+                      onToggleStatus={handleToggleCampaignStatus}
+                      onPublishCampaign={handlePublishCampaign}
+                      onBulkPause={handleBulkPause}
+                      onBulkResume={handleBulkResume}
+                      onBulkDuplicate={handleBulkDuplicate}
+                      onDeleteCampaign={handleDeleteCampaign}
+                      onBulkDelete={handleBulkDelete}
+                    />
+                  )}
 
-                    {activeTab === 'campaigns' && (
-                      <CampaignManager
-                        campaigns={campaigns}
-                        onOpenWizard={() => {
-                          setAiWizardInitialData(null);
-                          setIsWizardOpen(true);
-                        }}
-                        onSelectCampaign={(c) => setSelectedCampaign(c)}
-                        onToggleStatus={handleToggleCampaignStatus}
-                        onPublishCampaign={handlePublishCampaign}
-                        onBulkPause={handleBulkPause}
-                        onBulkResume={handleBulkResume}
-                        onBulkDuplicate={handleBulkDuplicate}
-                        onDeleteCampaign={handleDeleteCampaign}
-                        onBulkDelete={handleBulkDelete}
-                      />
-                    )}
+                  {activeTab === 'analytics' && (
+                    <MarketIntelligence
+                      campaigns={campaigns}
+                      channels={channels}
+                      timeSeries={timeSeries}
+                      onOpenWizard={() => {
+                        setAiWizardInitialData(null);
+                        setIsWizardOpen(true);
+                      }}
+                      onSelectCampaign={(c) => setSelectedCampaign(c)}
+                      currency={currentCurrency}
+                      locale={currentLocale}
+                    />
+                  )}
 
-                    {activeTab === 'analytics' && (
-                      <MarketIntelligence
-                        campaigns={campaigns}
-                        channels={channels}
-                        timeSeries={timeSeries}
-                        onOpenWizard={() => {
-                          setAiWizardInitialData(null);
-                          setIsWizardOpen(true);
-                        }}
-                        onSelectCampaign={(c) => setSelectedCampaign(c)}
-                        currency={currentCurrency}
-                        locale={currentLocale}
-                      />
-                    )}
+                  {activeTab === 'ai-studio' && (
+                    <AiAdStudio
+                      onOpenWizardWithAiData={handleOpenWizardWithAiData}
+                    />
+                  )}
 
-                    {activeTab === 'ai-studio' && (
-                      <AiAdStudio
-                        onOpenWizardWithAiData={handleOpenWizardWithAiData}
-                      />
-                    )}
+                  {activeTab === 'api-nexus' && (
+                    <ApiNexus
+                      channels={channels}
+                      onTestChannel={handleTestChannel}
+                      orgId={currentOrgId}
+                      currentUserRole={userRole}
+                      currentUserPermissions={userPermissions}
+                    />
+                  )}
 
-                    {activeTab === 'api-nexus' && (
-                      <ApiNexus
-                        channels={channels}
-                        onTestChannel={handleTestChannel}
-                        orgId={currentOrgId}
-                        currentUserRole={userRole}
-                        currentUserPermissions={userPermissions}
-                      />
-                    )}
+                  {activeTab === 'financials' && (
+                    <FinancialLedger
+                      invoices={invoices}
+                      onSelectInvoice={(inv) => setSelectedInvoice(inv)}
+                      onPayInvoice={handlePayInvoice}
+                      onAddAuditLogEntry={handleAddAuditLogEntry}
+                      currency={currentCurrency}
+                      locale={currentLocale}
+                    />
+                  )}
 
-                    {activeTab === 'financials' && (
-                      <FinancialLedger
-                        invoices={invoices}
-                        onSelectInvoice={(inv) => setSelectedInvoice(inv)}
-                        onPayInvoice={handlePayInvoice}
-                        onAddAuditLogEntry={handleAddAuditLogEntry}
-                        currency={currentCurrency}
-                        locale={currentLocale}
-                      />
-                    )}
-
-                    {activeTab === 'team' && (
-                      <TeamManagement
-                        orgId={currentOrgId}
-                        currentUserEmail={currentUser?.email || undefined}
-                        currentUserRole={userRole}
-                        currentUserPermissions={userPermissions}
-                      />
-                    )}
-                  </>
-                );
-              })()}
+                  {activeTab === 'team' && (
+                    <TeamManagement
+                      orgId={currentOrgId}
+                      currentUserEmail={currentUser?.email || undefined}
+                      currentUserRole={userRole}
+                      currentUserPermissions={userPermissions}
+                    />
+                  )}
+                </>
+              )}
             </main>
           </div>
         </div>
@@ -818,6 +822,7 @@ Specifically:
         onClose={() => setSelectedCampaign(null)}
         onToggleStatus={handleToggleCampaignStatus}
         onPublish={handlePublishCampaign}
+        onDelete={handleDeleteCampaign}
       />
 
     </div>

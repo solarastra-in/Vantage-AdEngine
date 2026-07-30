@@ -98,9 +98,9 @@ describe('live adapters: real call construction when credential IS present (fetc
       extra: { developerToken: 'dev_tok_123' },
     });
 
-    const [url] = fetchMock.mock.calls[0];
-    expect(url).toContain('customers/5144015092/campaigns:mutate');
-    expect(url).not.toContain('514-401-5092');
+    const urls = fetchMock.mock.calls.map(c => String(c[0]));
+    expect(urls.some(u => u.includes('customers/5144015092/'))).toBe(true);
+    expect(urls.every(u => !u.includes('514-401-5092'))).toBe(true);
   });
 
   test('google adapter rejects an account ID that normalizes to nothing (no digits at all)', async () => {

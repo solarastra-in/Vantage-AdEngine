@@ -8,6 +8,7 @@ import {
   addDoc, 
   updateDoc, 
   deleteDoc, 
+  writeBatch,
   query, 
   where, 
   orderBy,
@@ -15,72 +16,21 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Campaign, ChannelApiStatus, Invoice, PlatformType, ChannelCredentials } from '../types';
-import { INITIAL_CHANNELS, INITIAL_INVOICES } from '../data/initialData';
 
-// Initial Default Credentials Config for All 7 Platforms
-export const DEFAULT_CHANNEL_CREDENTIALS: Record<PlatformType, ChannelCredentials> = {
-  meta: {
-    platform: 'meta',
-    accountId: 'act_98230192',
-    apiKeyOrToken: 'EAAG_live_simulated_token_meta_9912',
-    pixelIdOrTag: 'pix_448201928',
-    environment: 'SANDBOX_SIMULATED',
-    lastValidatedAt: new Date().toISOString(),
-    validationStatus: 'CONNECTED',
-  },
-  google: {
-    platform: 'google',
-    accountId: '883-201-12',
-    apiKeyOrToken: 'goog_oauth_refresh_token_sim_8812',
-    developerToken: 'goog_dev_tok_991283',
-    environment: 'SANDBOX_SIMULATED',
-    lastValidatedAt: new Date().toISOString(),
-    validationStatus: 'CONNECTED',
-  },
-  linkedin: {
-    platform: 'linkedin',
-    accountId: 'urn:li:sponsoredAccount:554109',
-    apiKeyOrToken: 'li_oauth2_access_tok_88102',
-    merchantOrCompanyUrn: 'urn:li:organization:1029384',
-    environment: 'SANDBOX_SIMULATED',
-    lastValidatedAt: new Date().toISOString(),
-    validationStatus: 'CONNECTED',
-  },
-  tiktok: {
-    platform: 'tiktok',
-    accountId: 'tt_adv_883210',
-    apiKeyOrToken: 'tt_app_secret_tok_991029',
-    apiSecret: 'spark_auth_771029381',
-    environment: 'SANDBOX_SIMULATED',
-    lastValidatedAt: new Date().toISOString(),
-    validationStatus: 'CONNECTED',
-  },
-  pinterest: {
-    platform: 'pinterest',
-    accountId: '54982103',
-    apiKeyOrToken: 'pina_access_tok_v5_99210',
-    merchantOrCompanyUrn: 'urn:pin:catalog:883920',
-    environment: 'SANDBOX_SIMULATED',
-    lastValidatedAt: new Date().toISOString(),
-    validationStatus: 'CONNECTED',
-  },
-  x: {
-    platform: 'x',
-    accountId: 'x_promoted_10293',
-    apiKeyOrToken: 'x_bearer_tok_ads_v11_88102',
-    environment: 'SANDBOX_SIMULATED',
-    lastValidatedAt: new Date().toISOString(),
-    validationStatus: 'CONNECTED',
-  },
-  programmatic: {
-    platform: 'programmatic',
-    accountId: 'ttd_seat_99210',
-    apiKeyOrToken: 'dsp_openrtb_secret_99210',
-    environment: 'SANDBOX_SIMULATED',
-    lastValidatedAt: new Date().toISOString(),
-    validationStatus: 'CONNECTED',
-  },
-};
+export const ALL_PLATFORM_TYPES: PlatformType[] = ['meta', 'google', 'linkedin', 'tiktok', 'pinterest', 'x', 'programmatic'];
+
+export const EMPTY_CHANNEL_CREDENTIALS: Record<PlatformType, ChannelCredentials> = Object.fromEntries(
+  ALL_PLATFORM_TYPES.map(platform => [
+    platform,
+    {
+      platform,
+      accountId: '',
+      apiKeyOrToken: '',
+      environment: 'PRODUCTION' as const,
+      validationStatus: 'DISCONNECTED' as const,
+    },
+  ])
+) as Record<PlatformType, ChannelCredentials>;
 
 
 export interface Organization {
@@ -246,46 +196,6 @@ export function sanitizeForFirestore<T>(data: T): T {
   return cleaned as T;
 }
 
-// 1. Seed Firestore Data if empty
-export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => {
-  try {
-    // Check organizations
-    const orgsRef = collection(db, 'organizations');
-    const orgsSnap = await getDocs(orgsRef);
-
-    if (orgsSnap.empty) {
-      console.log('Seeding initial multi-tenant organizations to Firestore...');
-      for (const org of INITIAL_ORGANIZATIONS) {
-        await setDoc(doc(db, 'organizations', org.id), sanitizeForFirestore(org));
-      }
-    }
-
-    // ONLY seed sample channels/invoices for the primary demo org (org-astracloud) if needed
-    if (orgId === 'org-astracloud') {
-      const channelsRef = collection(db, `organizations/${orgId}/channels`);
-      const chSnap = await getDocs(channelsRef);
-
-      if (chSnap.empty) {
-        console.log(`Seeding initial channels for tenant ${orgId} to Firestore...`);
-        for (const channel of INITIAL_CHANNELS) {
-          await setDoc(doc(db, `organizations/${orgId}/channels`, channel.platform), sanitizeForFirestore(channel));
-        }
-      }
-
-      const invoicesRef = collection(db, `organizations/${orgId}/invoices`);
-      const invSnap = await getDocs(invoicesRef);
-
-      if (invSnap.empty) {
-        console.log(`Seeding initial invoices for tenant ${orgId} to Firestore...`);
-        for (const invoice of INITIAL_INVOICES) {
-          await setDoc(doc(db, `organizations/${orgId}/invoices`, invoice.id), sanitizeForFirestore(invoice));
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Firestore auto-seed error:', error);
-  }
-};
 
 // 2. Organization Management
 export const fetchOrganizationsFromFirestore = async (): Promise<Organization[]> => {
@@ -293,28 +203,20 @@ export const fetchOrganizationsFromFirestore = async (): Promise<Organization[]>
     const orgsRef = collection(db, 'organizations');
     const snap = await getDocs(orgsRef);
 
-    if (snap.empty) {
-      await seedFirestoreIfEmpty();
-      return INITIAL_ORGANIZATIONS;
-    }
-
     const orgs: Organization[] = [];
     snap.forEach(docSnap => {
       orgs.push(docSnap.data() as Organization);
     });
     return orgs;
   } catch (error) {
-    console.warn('Fallback to local organizations due to Firestore read:', error);
-    return INITIAL_ORGANIZATIONS;
+    console.warn('Error reading organizations from Firestore:', error);
+    return [];
   }
 };
 
 export const createOrganizationInFirestore = async (newOrg: Organization) => {
   try {
     await setDoc(doc(db, 'organizations', newOrg.id), sanitizeForFirestore(newOrg));
-    if (newOrg.id === 'org-astracloud') {
-      await seedFirestoreIfEmpty(newOrg.id);
-    }
   } catch (error) {
     console.error('Error creating organization in Firestore:', error);
     throw error;
@@ -377,11 +279,32 @@ export const updateCampaignStatusInFirestore = async (
 };
 
 export const deleteCampaignFromFirestore = async (orgId: string, campaignId: string) => {
+  if (!orgId || !campaignId) return;
   try {
     const campaignRef = doc(db, `organizations/${orgId}/campaigns`, campaignId);
     await deleteDoc(campaignRef);
   } catch (error) {
     console.error(`Error deleting campaign ${campaignId} from Firestore:`, error);
+  }
+};
+
+export const bulkDeleteCampaignsFromFirestore = async (orgId: string, campaignIds: string[]) => {
+  if (!orgId || !campaignIds || campaignIds.length === 0) return;
+  try {
+    const batch = writeBatch(db);
+    campaignIds.forEach(id => {
+      if (id) {
+        const campaignRef = doc(db, `organizations/${orgId}/campaigns`, id);
+        batch.delete(campaignRef);
+      }
+    });
+    await batch.commit();
+  } catch (error) {
+    console.error(`Error bulk deleting campaigns from Firestore:`, error);
+    // Fallback: delete each individually
+    await Promise.allSettled(
+      campaignIds.map(id => deleteCampaignFromFirestore(orgId, id))
+    );
   }
 };
 
@@ -392,10 +315,6 @@ export const fetchInvoicesFromFirestore = async (orgId: string): Promise<Invoice
     const snap = await getDocs(ref);
 
     if (snap.empty) {
-      if (orgId === 'org-astracloud') {
-        await seedFirestoreIfEmpty(orgId);
-        return INITIAL_INVOICES;
-      }
       return [];
     }
 
@@ -406,7 +325,7 @@ export const fetchInvoicesFromFirestore = async (orgId: string): Promise<Invoice
     return invoices;
   } catch (error) {
     console.warn(`Fallback for invoices for tenant ${orgId}:`, error);
-    return orgId === 'org-astracloud' ? INITIAL_INVOICES : [];
+    return [];
   }
 };
 
@@ -438,36 +357,48 @@ export const updateInvoiceStatusInFirestore = async (
 };
 
 // 5. Channels Operations per Tenant
+const PLATFORM_DISPLAY_NAMES: Record<PlatformType, string> = {
+  meta: 'Meta Marketing API',
+  google: 'Google Ads API',
+  linkedin: 'LinkedIn Marketing API',
+  tiktok: 'TikTok Business API',
+  pinterest: 'Pinterest Ads API',
+  x: 'X (Twitter) Ads API',
+  programmatic: 'Programmatic DSP',
+};
+
+function emptyChannelStatus(platform: PlatformType): ChannelApiStatus {
+  return {
+    platform,
+    name: PLATFORM_DISPLAY_NAMES[platform],
+    connected: false,
+    apiKeySet: false,
+    endpointUrl: '',
+    healthStatus: 'disconnected',
+    latencyMs: 0,
+    activeCampaignsCount: 0,
+    totalSpent: 0,
+  };
+}
+
 export const fetchChannelsFromFirestore = async (orgId: string): Promise<ChannelApiStatus[]> => {
   try {
     const ref = collection(db, `organizations/${orgId}/channels`);
     const snap = await getDocs(ref);
 
     if (snap.empty) {
-      if (orgId === 'org-astracloud') {
-        await seedFirestoreIfEmpty(orgId);
-        return INITIAL_CHANNELS;
-      }
-      // Clean default channels for new tenant
-      const defaultChannels: ChannelApiStatus[] = INITIAL_CHANNELS.map(ch => ({
-        ...ch,
-        status: 'DISCONNECTED',
-        connectedAccountsCount: 0,
-        activeCampaignsCount: 0,
-        spendThisMonth: 0,
-        latencyMs: 0,
-      }));
-      return defaultChannels;
+      return ALL_PLATFORM_TYPES.map(emptyChannelStatus);
     }
 
-    const channels: ChannelApiStatus[] = [];
+    const byPlatform = new Map<PlatformType, ChannelApiStatus>();
     snap.forEach(d => {
-      channels.push(d.data() as ChannelApiStatus);
+      const ch = d.data() as ChannelApiStatus;
+      byPlatform.set(ch.platform, ch);
     });
-    return channels;
+    return ALL_PLATFORM_TYPES.map(p => byPlatform.get(p) ?? emptyChannelStatus(p));
   } catch (error) {
-    console.warn(`Fallback to local channels:`, error);
-    return orgId === 'org-astracloud' ? INITIAL_CHANNELS : [];
+    console.warn(`Fallback to empty channels:`, error);
+    return ALL_PLATFORM_TYPES.map(emptyChannelStatus);
   }
 };
 
@@ -515,27 +446,31 @@ export const fetchLeadsFromFirestore = async (): Promise<ContactLead[]> => {
 };
 
 // 7. Channel Credentials Persistence per Tenant
+function emptyChannelCredentials(platform: PlatformType): ChannelCredentials {
+  return {
+    platform,
+    accountId: '',
+    apiKeyOrToken: '',
+    environment: 'PRODUCTION',
+    validationStatus: 'DISCONNECTED',
+  };
+}
+
 export const fetchChannelCredentialsFromFirestore = async (orgId: string): Promise<Record<string, ChannelCredentials>> => {
   try {
     const ref = collection(db, `organizations/${orgId}/credentials`);
     const snap = await getDocs(ref);
 
-    if (snap.empty) {
-      // Seed default initial credentials
-      for (const [platform, creds] of Object.entries(DEFAULT_CHANNEL_CREDENTIALS)) {
-        await setDoc(doc(db, `organizations/${orgId}/credentials`, platform), sanitizeForFirestore(creds));
-      }
-      return DEFAULT_CHANNEL_CREDENTIALS;
-    }
-
-    const credentials: Record<string, ChannelCredentials> = { ...DEFAULT_CHANNEL_CREDENTIALS };
+    const credentials: Record<string, ChannelCredentials> = Object.fromEntries(
+      ALL_PLATFORM_TYPES.map(p => [p, emptyChannelCredentials(p)])
+    );
     snap.forEach(d => {
       credentials[d.id] = d.data() as ChannelCredentials;
     });
     return credentials;
   } catch (error) {
-    console.warn(`Fallback to default channel credentials for tenant ${orgId}:`, error);
-    return DEFAULT_CHANNEL_CREDENTIALS;
+    console.warn(`Fallback to empty channel credentials for tenant ${orgId}:`, error);
+    return EMPTY_CHANNEL_CREDENTIALS;
   }
 };
 
@@ -734,7 +669,6 @@ export const onboardNewOrganization = async (
   };
 
   await setDoc(doc(db, 'organizations', orgId), sanitizeForFirestore(newOrg));
-  await seedFirestoreIfEmpty(orgId);
 
   // The founder is auto-authorized as an ACCEPTED admin employee of their
   // own new org -- no invite step needed for the person creating it.

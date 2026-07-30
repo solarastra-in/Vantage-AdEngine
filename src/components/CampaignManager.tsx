@@ -119,16 +119,19 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
     showNotice(`Bulk duplicated ${selectedIds.length} campaign(s).`);
   };
 
-  const handleDeleteSelected = () => {
+  const handleDeleteSelected = async () => {
     if (selectedIds.length === 0) return;
     if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected campaign(s)?`)) {
-      if (onBulkDelete) {
-        onBulkDelete(selectedIds);
-      } else if (onDeleteCampaign) {
-        selectedIds.forEach(id => onDeleteCampaign(id));
-      }
-      showNotice(`Deleted ${selectedIds.length} campaign(s).`);
+      const idsToDelete = [...selectedIds];
       setSelectedIds([]);
+      if (onBulkDelete) {
+        await onBulkDelete(idsToDelete);
+      } else if (onDeleteCampaign) {
+        for (const id of idsToDelete) {
+          await onDeleteCampaign(id);
+        }
+      }
+      showNotice(`Deleted ${idsToDelete.length} campaign(s).`);
     }
   };
 
@@ -358,10 +361,11 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
 
                   {onDeleteCampaign && (
                     <button
-                      onClick={() => {
+                      onClick={async (e) => {
+                        e.stopPropagation();
                         if (window.confirm(`Are you sure you want to delete campaign "${campaign.name}"?`)) {
-                          onDeleteCampaign(campaign.id);
                           setSelectedIds(prev => prev.filter(id => id !== campaign.id));
+                          await onDeleteCampaign(campaign.id);
                           showNotice(`Deleted campaign "${campaign.name}".`);
                         }
                       }}
