@@ -23,6 +23,7 @@ import {
   fetchOrganizationsFromFirestore, 
   fetchCampaignsFromFirestore, 
   saveCampaignToFirestore, 
+  deleteCampaignFromFirestore, 
   fetchInvoicesFromFirestore, 
   updateInvoiceStatusInFirestore,
   fetchChannelsFromFirestore,
@@ -396,6 +397,26 @@ export function App() {
     }
   };
 
+  // Delete Single Campaign
+  const handleDeleteCampaign = async (campaignId: string) => {
+    setCampaigns(prev => prev.filter(c => c.id !== campaignId));
+    if (selectedCampaign?.id === campaignId) {
+      setSelectedCampaign(null);
+    }
+    await deleteCampaignFromFirestore(currentOrgId, campaignId);
+  };
+
+  // Bulk Delete Campaigns
+  const handleBulkDelete = async (campaignIds: string[]) => {
+    setCampaigns(prev => prev.filter(c => !campaignIds.includes(c.id)));
+    if (selectedCampaign && campaignIds.includes(selectedCampaign.id)) {
+      setSelectedCampaign(null);
+    }
+    for (const id of campaignIds) {
+      await deleteCampaignFromFirestore(currentOrgId, id);
+    }
+  };
+
   // Test Channel API Gateway
   const handleTestChannel = async (platform: PlatformType) => {
     try {
@@ -702,6 +723,8 @@ Specifically:
                         onBulkPause={handleBulkPause}
                         onBulkResume={handleBulkResume}
                         onBulkDuplicate={handleBulkDuplicate}
+                        onDeleteCampaign={handleDeleteCampaign}
+                        onBulkDelete={handleBulkDelete}
                       />
                     )}
 

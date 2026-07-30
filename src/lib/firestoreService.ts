@@ -390,6 +390,15 @@ export const updateCampaignStatusInFirestore = async (
   }
 };
 
+export const deleteCampaignFromFirestore = async (orgId: string, campaignId: string) => {
+  try {
+    const campaignRef = doc(db, `organizations/${orgId}/campaigns`, campaignId);
+    await deleteDoc(campaignRef);
+  } catch (error) {
+    console.error(`Error deleting campaign ${campaignId} from Firestore:`, error);
+  }
+};
+
 // 4. Invoices Operations per Tenant
 export const fetchInvoicesFromFirestore = async (orgId: string): Promise<Invoice[]> => {
   try {

@@ -19,7 +19,8 @@ import {
   Square,
   X,
   Layers,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 
 interface CampaignManagerProps {
@@ -28,9 +29,11 @@ interface CampaignManagerProps {
   onSelectCampaign: (campaign: Campaign) => void;
   onToggleStatus: (campaignId: string) => void;
   onPublishCampaign: (campaignId: string) => void;
+  onDeleteCampaign?: (campaignId: string) => void;
   onBulkPause?: (campaignIds: string[]) => void;
   onBulkResume?: (campaignIds: string[]) => void;
   onBulkDuplicate?: (campaignIds: string[]) => void;
+  onBulkDelete?: (campaignIds: string[]) => void;
 }
 
 export const CampaignManager: React.FC<CampaignManagerProps> = ({
@@ -39,9 +42,11 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
   onSelectCampaign,
   onToggleStatus,
   onPublishCampaign,
+  onDeleteCampaign,
   onBulkPause,
   onBulkResume,
   onBulkDuplicate,
+  onBulkDelete,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'publishing' | 'paused' | 'draft'>('all');
@@ -112,6 +117,19 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
       onBulkDuplicate(selectedIds);
     }
     showNotice(`Bulk duplicated ${selectedIds.length} campaign(s).`);
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedIds.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected campaign(s)?`)) {
+      if (onBulkDelete) {
+        onBulkDelete(selectedIds);
+      } else if (onDeleteCampaign) {
+        selectedIds.forEach(id => onDeleteCampaign(id));
+      }
+      showNotice(`Deleted ${selectedIds.length} campaign(s).`);
+      setSelectedIds([]);
+    }
   };
 
   return (
@@ -243,6 +261,14 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
             </button>
 
             <button
+              onClick={handleDeleteSelected}
+              className="bg-red-950/80 hover:bg-red-900 border border-red-700/80 text-red-200 px-3.5 py-2 text-xs font-mono font-bold uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-1.5 rounded-xs shadow-md shadow-red-900/20"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <span>Delete Selected ({selectedIds.length})</span>
+            </button>
+
+            <button
               onClick={() => setSelectedIds([])}
               className="p-2 text-stone-400 hover:text-white hover:bg-stone-800 rounded-xs transition-colors cursor-pointer"
               title="Clear Selection"
@@ -329,6 +355,22 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
                   >
                     <ArrowUpRight className="w-4 h-4" />
                   </button>
+
+                  {onDeleteCampaign && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to delete campaign "${campaign.name}"?`)) {
+                          onDeleteCampaign(campaign.id);
+                          setSelectedIds(prev => prev.filter(id => id !== campaign.id));
+                          showNotice(`Deleted campaign "${campaign.name}".`);
+                        }
+                      }}
+                      className="bg-stone-900 hover:bg-red-950/60 border border-stone-700 hover:border-red-600 text-stone-400 hover:text-red-300 p-2 text-xs font-medium cursor-pointer transition-colors rounded-xs"
+                      title="Delete Campaign"
+                    >
+                      <Trash2 className="w-4 h-4 text-red-400" />
+                    </button>
+                  )}
                 </div>
               </div>
 
