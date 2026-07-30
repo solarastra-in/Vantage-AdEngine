@@ -137,12 +137,30 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
                         <td className="py-3 px-4 text-white font-bold">{ch.platformName}</td>
                         <td className="py-3 px-4 text-stone-400">{ch.targeting}</td>
                         <td className="py-3 px-4 text-right text-stone-200">${ch.budget.toLocaleString()}</td>
-                        <td className="py-3 px-4 text-stone-400">{publishStatus?.externalId || 'Pending Dispatch'}</td>
+                        <td className="py-3 px-4 text-stone-400">
+                          {publishStatus?.externalId ? (
+                            publishStatus.externalId.startsWith('DRYRUN_') ? (
+                              <span className="text-amber-400/90 font-mono text-[11px]" title="Dry-Run mode (No API Credentials configured)">
+                                {publishStatus.externalId} <span className="text-[9px] bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1 py-0.5 rounded-xs ml-1">Dry-Run</span>
+                              </span>
+                            ) : (
+                              <span className="text-emerald-400 font-mono text-[11px]" title="Live Production API Dispatch">
+                                {publishStatus.externalId} <span className="text-[9px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1 py-0.5 rounded-xs ml-1">Live API</span>
+                              </span>
+                            )
+                          ) : (
+                            'Pending Dispatch'
+                          )}
+                        </td>
                         <td className="py-3 px-4 text-right">
                           <span className={`px-2 py-0.5 rounded-xs text-[10px] uppercase font-bold ${
-                            publishStatus?.status === 'live' ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10'
+                            publishStatus?.status === 'live' 
+                              ? (publishStatus.externalId?.startsWith('DRYRUN_') ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20' : 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20')
+                              : 'text-stone-400 bg-stone-800 border border-stone-700'
                           }`}>
-                            {publishStatus?.status || 'draft'}
+                            {publishStatus?.status === 'live' 
+                              ? (publishStatus.externalId?.startsWith('DRYRUN_') ? 'Dry-Run OK' : 'Live') 
+                              : (publishStatus?.status || 'draft')}
                           </span>
                         </td>
                       </tr>
@@ -151,6 +169,18 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {campaign.publishStatuses.some(ps => ps.externalId?.startsWith('DRYRUN_')) && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs rounded-xs flex items-start gap-2.5">
+                <span className="text-amber-400 text-base">💡</span>
+                <div>
+                  <p className="font-bold text-white mb-0.5">Google Ads & Channel Credentials Note:</p>
+                  <p className="text-stone-300 text-[11px] leading-relaxed">
+                    This campaign ran in <strong className="text-amber-300">Dry-Run mode</strong> for channels without connected API credentials. To publish live ads directly to your production <strong className="text-white">Google Ads account</strong> or <strong className="text-white">Meta Ad Account</strong>, open <strong className="text-amber-300">API Nexus</strong> from the sidebar and input your Customer ID, Developer Token, and OAuth Access Token.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

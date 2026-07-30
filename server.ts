@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
-import { INITIAL_CAMPAIGNS, INITIAL_CHANNELS, INITIAL_INVOICES, INITIAL_TIME_SERIES } from './src/data/initialData';
+import { INITIAL_CHANNELS, INITIAL_INVOICES, INITIAL_TIME_SERIES } from './src/data/initialData';
 import { Campaign, ChannelApiStatus, Invoice, PlatformType } from './src/types';
 import { encryptSecret, decryptSecret } from './src/lib/vaultCrypto.server';
 import { recordVaultAudit, getVaultAuditLog, detectAnomalousAccess, VaultAuditAction } from './src/lib/vaultAuditLog.server';
@@ -40,9 +40,8 @@ function logStartupDiagnostics() {
 }
 logStartupDiagnostics();
 
-// In-Memory Storage. Campaigns are tenant-scoped via orgId (seed data
-// defaults to DEFAULT_ORG_ID since it predates multi-tenant scoping).
-let campaigns: Campaign[] = INITIAL_CAMPAIGNS.map(c => ({ ...c, orgId: c.orgId ?? DEFAULT_ORG_ID }));
+// In-Memory Storage. Campaigns are tenant-scoped via orgId.
+let campaigns: Campaign[] = [];
 let channels: ChannelApiStatus[] = [...INITIAL_CHANNELS];
 let invoices: Invoice[] = [...INITIAL_INVOICES];
 let timeSeriesData = [...INITIAL_TIME_SERIES];

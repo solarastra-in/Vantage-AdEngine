@@ -404,6 +404,10 @@ export function App() {
       setSelectedCampaign(null);
     }
     await deleteCampaignFromFirestore(currentOrgId, campaignId);
+    fetch(`/api/campaigns/${campaignId}`, {
+      method: 'DELETE',
+      headers: { 'X-Org-Id': currentOrgId },
+    }).catch(() => {});
   };
 
   // Bulk Delete Campaigns
@@ -414,6 +418,10 @@ export function App() {
     }
     for (const id of campaignIds) {
       await deleteCampaignFromFirestore(currentOrgId, id);
+      fetch(`/api/campaigns/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Org-Id': currentOrgId },
+      }).catch(() => {});
     }
   };
 

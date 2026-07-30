@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Campaign, ChannelApiStatus, Invoice, PlatformType, ChannelCredentials } from '../types';
-import { INITIAL_CAMPAIGNS, INITIAL_CHANNELS, INITIAL_INVOICES } from '../data/initialData';
+import { INITIAL_CHANNELS, INITIAL_INVOICES } from '../data/initialData';
 
 // Initial Default Credentials Config for All 7 Platforms
 export const DEFAULT_CHANNEL_CREDENTIALS: Record<PlatformType, ChannelCredentials> = {
@@ -260,18 +260,8 @@ export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => 
       }
     }
 
-    // ONLY seed sample campaigns/channels/invoices for the primary demo org (org-astracloud)
+    // ONLY seed sample channels/invoices for the primary demo org (org-astracloud) if needed
     if (orgId === 'org-astracloud') {
-      const campaignsRef = collection(db, `organizations/${orgId}/campaigns`);
-      const cmpSnap = await getDocs(campaignsRef);
-
-      if (cmpSnap.empty) {
-        console.log(`Seeding initial campaigns for tenant ${orgId} to Firestore...`);
-        for (const campaign of INITIAL_CAMPAIGNS) {
-          await setDoc(doc(db, `organizations/${orgId}/campaigns`, campaign.id), sanitizeForFirestore(campaign));
-        }
-      }
-
       const channelsRef = collection(db, `organizations/${orgId}/channels`);
       const chSnap = await getDocs(channelsRef);
 
@@ -350,10 +340,6 @@ export const fetchCampaignsFromFirestore = async (orgId: string): Promise<Campai
     const snap = await getDocs(ref);
 
     if (snap.empty) {
-      if (orgId === 'org-astracloud') {
-        await seedFirestoreIfEmpty(orgId);
-        return INITIAL_CAMPAIGNS;
-      }
       return [];
     }
 
@@ -364,7 +350,7 @@ export const fetchCampaignsFromFirestore = async (orgId: string): Promise<Campai
     return campaigns;
   } catch (error) {
     console.warn(`Fallback for campaigns for tenant ${orgId}:`, error);
-    return orgId === 'org-astracloud' ? INITIAL_CAMPAIGNS : [];
+    return [];
   }
 };
 

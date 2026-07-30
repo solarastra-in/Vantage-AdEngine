@@ -85,8 +85,14 @@ export const DispatchReportBanner: React.FC<{ report: DispatchReportUI; onDismis
         ))}
       </div>
 
+      {report.results.some(r => r.mode === 'DRY_RUN' || r.externalId?.startsWith('DRYRUN_')) && (
+        <div className="mt-2.5 pt-2 border-t border-stone-800/80 text-[10px] text-amber-300/90 leading-snug">
+          💡 <span className="font-semibold">Dry-Run Mode:</span> Channels without connected API credentials run in Dry-Run mode. To publish directly to your live Google Ads or Meta account, configure API credentials in <span className="underline font-semibold">API Nexus</span>.
+        </div>
+      )}
+
       {report.overallStatus !== 'ALL_LIVE' && (
-        <p className="mt-3 text-[10px] text-stone-500 leading-relaxed border-t border-stone-800/60 pt-2">
+        <p className="mt-2 text-[10px] text-stone-500 leading-relaxed border-t border-stone-800/60 pt-1.5">
           {report.overallStatus === 'ALL_FAILED'
             ? 'This campaign was not left partially live: any channel that briefly succeeded was rolled back automatically.'
             : 'Partial-publish mode is on -- failed channels above did not roll back the ones that succeeded.'}
