@@ -52,6 +52,13 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'publishing' | 'paused' | 'draft'>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{
+    type: 'single' | 'bulk';
+    id?: string;
+    name?: string;
+    count?: number;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const filteredCampaigns = campaigns.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -119,19 +126,44 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
     showNotice(`Bulk duplicated ${selectedIds.length} campaign(s).`);
   };
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = () => {
     if (selectedIds.length === 0) return;
-    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected campaign(s)?`)) {
-      const idsToDelete = [...selectedIds];
-      setSelectedIds([]);
-      if (onBulkDelete) {
-        await onBulkDelete(idsToDelete);
-      } else if (onDeleteCampaign) {
-        for (const id of idsToDelete) {
+    setDeleteConfirmTarget({
+      type: 'bulk',
+      count: selectedIds.length,
+    });
+  };
+
+  const executeConfirmedDelete = async () => {
+    if (!deleteConfirmTarget) return;
+    setIsDeleting(true);
+    try {
+      if (deleteConfirmTarget.type === 'bulk') {
+        const idsToDelete = [...selectedIds];
+        setSelectedIds([]);
+        if (onBulkDelete) {
+          await onBulkDelete(idsToDelete);
+        } else if (onDeleteCampaign) {
+          for (const id of idsToDelete) {
+            await onDeleteCampaign(id);
+          }
+        }
+        showNotice(`Successfully deleted ${idsToDelete.length} campaign(s).`);
+      } else if (deleteConfirmTarget.type === 'single' && deleteConfirmTarget.id) {
+        const id = deleteConfirmTarget.id;
+        const name = deleteConfirmTarget.name || 'Campaign';
+        setSelectedIds(prev => prev.filter(i => i !== id));
+        if (onDeleteCampaign) {
           await onDeleteCampaign(id);
         }
+        showNotice(`Successfully deleted campaign "${name}".`);
       }
-      showNotice(`Deleted ${idsToDelete.length} campaign(s).`);
+    } catch (err) {
+      console.error('Delete execution error:', err);
+      showNotice('Failed to delete campaign(s). Please try again.');
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmTarget(null);
     }
   };
 
@@ -361,13 +393,13 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
 
                   {onDeleteCampaign && (
                     <button
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-                        if (window.confirm(`Are you sure you want to delete campaign "${campaign.name}"?`)) {
-                          setSelectedIds(prev => prev.filter(id => id !== campaign.id));
-                          await onDeleteCampaign(campaign.id);
-                          showNotice(`Deleted campaign "${campaign.name}".`);
-                        }
+                        setDeleteConfirmTarget({
+                          type: 'single',
+                          id: campaign.id,
+                          name: campaign.name,
+                        });
                       }}
                       className="bg-stone-900 hover:bg-red-950/60 border border-stone-700 hover:border-red-600 text-stone-400 hover:text-red-300 p-2 text-xs font-medium cursor-pointer transition-colors rounded-xs"
                       title="Delete Campaign"
@@ -433,6 +465,52 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Custom Delete Confirmation Modal */}
+      {deleteConfirmTarget && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#121212] border border-red-900/50 rounded-xs max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-red-950/80 border border-red-800 text-red-400 rounded-xs">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-white">
+                  {deleteConfirmTarget.type === 'bulk'
+                    ? `Delete ${deleteConfirmTarget.count} Campaign(s)?`
+                    : `Delete "${deleteConfirmTarget.name}"?`}
+                </h3>
+                <p className="text-xs text-stone-400 mt-1 leading-relaxed">
+                  {deleteConfirmTarget.type === 'bulk'
+                    ? `Are you sure you want to permanently remove these ${deleteConfirmTarget.count} selected campaigns?`
+                    : `Are you sure you want to permanently remove this campaign?`}{' '}
+                  This action will remove all associated analytics, platform mappings, and budget histories. This cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-stone-800">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmTarget(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 border border-stone-700 text-stone-300 text-xs font-mono cursor-pointer rounded-xs transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeConfirmedDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-mono font-semibold cursor-pointer rounded-xs transition-colors flex items-center gap-1.5 shadow-md disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? 'Deleting...' : 'Delete Permanently'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

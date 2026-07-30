@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Trash2, Mail, ShieldCheck, Clock, X } from 'lucide-react';
+import { UserPlus, Trash2, Mail, ShieldCheck, Clock, X, AlertTriangle } from 'lucide-react';
 import { InvitedEmployee, EmployeePermissions, ADMIN_DEFAULT_PERMISSIONS, MEMBER_DEFAULT_PERMISSIONS, inviteEmployeeToOrg, listInvitedEmployees, removeInvitedEmployee } from '../lib/firestoreService';
 
 interface TeamManagementProps {

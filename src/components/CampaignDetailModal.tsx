@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Campaign } from '../types';
 import { 
   X, 
@@ -13,7 +13,8 @@ import {
   DollarSign,
   Play,
   Pause,
-  Trash2
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 
 interface CampaignDetailModalProps {
@@ -31,7 +32,24 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
   onPublish,
   onDelete,
 }) => {
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   if (!campaign) return null;
+
+  const handleConfirmDelete = async () => {
+    if (!onDelete) return;
+    setIsDeleting(true);
+    try {
+      await onDelete(campaign.id);
+      onClose();
+    } catch (err) {
+      console.error('Failed to delete campaign:', err);
+    } finally {
+      setIsDeleting(false);
+      setShowConfirmDelete(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
@@ -201,12 +219,7 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
           <div className="flex items-center gap-3">
             {onDelete && (
               <button
-                onClick={() => {
-                  if (window.confirm(`Are you sure you want to delete campaign "${campaign.name}"?`)) {
-                    onDelete(campaign.id);
-                    onClose();
-                  }
-                }}
+                onClick={() => setShowConfirmDelete(true)}
                 className="px-4 py-2 bg-red-950/80 hover:bg-red-900 border border-red-700/80 text-red-200 text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 rounded-xs"
               >
                 <Trash2 className="w-3.5 h-3.5 text-red-400" />
@@ -224,6 +237,47 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
         </div>
 
       </div>
+
+      {/* Confirmation Modal */}
+      {showConfirmDelete && (
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#121212] border border-red-900/50 rounded-xs max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-red-950/80 border border-red-800 text-red-400 rounded-xs">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-white">Delete Campaign?</h3>
+                <p className="text-xs text-stone-400 mt-1 leading-relaxed">
+                  Are you sure you want to delete campaign <strong className="text-white font-mono">"{campaign.name}"</strong>? This will permanently erase all channel configurations and analytics data. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-stone-800">
+              <button
+                type="button"
+                onClick={() => setShowConfirmDelete(false)}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 border border-stone-700 text-stone-300 text-xs font-mono cursor-pointer rounded-xs transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-mono font-semibold cursor-pointer rounded-xs transition-colors flex items-center gap-1.5 shadow-md disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? 'Deleting...' : 'Delete Permanently'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
     </div>
   );
 };
