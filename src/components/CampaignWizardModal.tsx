@@ -561,11 +561,11 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
       // 1. Channel Budget
       checkField(
-        ch.budget > 0,
+        ch.budget >= 500,
         2,
         `${plat}-budget`,
         `${ch.platformName} Budget`,
-        `Allocated budget for ${ch.platformName} must be greater than $0`,
+        `Allocated budget for ${ch.platformName} must be at least $500`,
         plat,
         ch.platformName
       );
@@ -620,6 +620,10 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       const cred = credentials[plat];
       const hasCred = Boolean(cred && (cred.accountId?.trim() || cred.apiKeyOrToken?.trim()));
       checkField(hasCred, 3, `${plat}-credentials`, `${ch.platformName} API Credentials`, `${ch.platformName} Account ID or API Token is required for live publish`, plat, ch.platformName);
+      if (hasCred) {
+        const keyVal = validateChannelApiKeyFormat(plat, cred.accountId || '', cred.apiKeyOrToken || '');
+        checkField(keyVal.isValid, 3, `${plat}-cred-format`, `${ch.platformName} API Key Format`, keyVal.error || `${ch.platformName} API key format is invalid`, plat, ch.platformName);
+      }
     });
 
     // --- STEP 4: Invoicing Contact Checks ---
@@ -1546,8 +1550,13 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     }
 
     // Validation: Required Images
+    const hasSquareImage = Boolean(
+      imageConfirmedState.square1x1 ||
+      (platformImages.square1x1 && platformImages.square1x1.trim() !== '') ||
+      (masterMediaUrl && masterMediaUrl.trim() !== '')
+    );
     if (activePlatforms.includes('meta') || activePlatforms.includes('google')) {
-      if (!imageConfirmedState.square1x1) {
+      if (!hasSquareImage) {
         setIsSubmitting(false);
         alert('Required Aspect Ratio Missing: Square (1:1) is REQUIRED for Meta and Google Ads. Please inspect and confirm the 1:1 image in Step 1.');
         setStep(1);
@@ -2734,7 +2743,11 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                       <input
                         type="text"
                         value={platformImages.square1x1}
-                        onChange={e => setPlatformImages({ ...platformImages, square1x1: e.target.value })}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setPlatformImages({ ...platformImages, square1x1: val });
+                          setImageConfirmedState(prev => ({ ...prev, square1x1: !!val.trim() }));
+                        }}
                         className="w-full bg-black border border-stone-800 px-2 py-1 text-stone-300 outline-none rounded"
                         placeholder="Image URL"
                       />
@@ -2776,7 +2789,11 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                       <input
                         type="text"
                         value={platformImages.vertical9x16}
-                        onChange={e => setPlatformImages({ ...platformImages, vertical9x16: e.target.value })}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setPlatformImages({ ...platformImages, vertical9x16: val });
+                          setImageConfirmedState(prev => ({ ...prev, vertical9x16: !!val.trim() }));
+                        }}
                         className="w-full bg-black border border-stone-800 px-2 py-1 text-stone-300 outline-none rounded"
                         placeholder="Image URL"
                       />
@@ -2818,7 +2835,11 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                       <input
                         type="text"
                         value={platformImages.landscape191x1}
-                        onChange={e => setPlatformImages({ ...platformImages, landscape191x1: e.target.value })}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setPlatformImages({ ...platformImages, landscape191x1: val });
+                          setImageConfirmedState(prev => ({ ...prev, landscape191x1: !!val.trim() }));
+                        }}
                         className="w-full bg-black border border-stone-800 px-2 py-1 text-stone-300 outline-none rounded"
                         placeholder="Image URL"
                       />

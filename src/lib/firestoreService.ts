@@ -224,6 +224,28 @@ export const INITIAL_ORGANIZATIONS: Organization[] = [
 // FIRESTORE TENANT SERVICE
 // -----------------------------------------------------------------
 
+/** Strips undefined properties recursively to prevent Firestore setDoc/addDoc/updateDoc invalid data errors */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (typeof data !== 'object') {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter(item => item !== undefined)
+      .map(item => sanitizeForFirestore(item)) as unknown as T;
+  }
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      cleaned[key] = sanitizeForFirestore(value);
+    }
+  }
+  return cleaned as T;
+}
+
 // 1. Seed Firestore Data if empty
 export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => {
   try {
@@ -234,7 +256,7 @@ export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => 
     if (orgsSnap.empty) {
       console.log('Seeding initial multi-tenant organizations to Firestore...');
       for (const org of INITIAL_ORGANIZATIONS) {
-        await setDoc(doc(db, 'organizations', org.id), org);
+        await setDoc(doc(db, 'organizations', org.id), sanitizeForFirestore(org));
       }
     }
 
@@ -246,7 +268,7 @@ export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => 
       if (cmpSnap.empty) {
         console.log(`Seeding initial campaigns for tenant ${orgId} to Firestore...`);
         for (const campaign of INITIAL_CAMPAIGNS) {
-          await setDoc(doc(db, `organizations/${orgId}/campaigns`, campaign.id), campaign);
+          await setDoc(doc(db, `organizations/${orgId}/campaigns`, campaign.id), sanitizeForFirestore(campaign));
         }
       }
 
@@ -256,7 +278,7 @@ export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => 
       if (chSnap.empty) {
         console.log(`Seeding initial channels for tenant ${orgId} to Firestore...`);
         for (const channel of INITIAL_CHANNELS) {
-          await setDoc(doc(db, `organizations/${orgId}/channels`, channel.platform), channel);
+          await setDoc(doc(db, `organizations/${orgId}/channels`, channel.platform), sanitizeForFirestore(channel));
         }
       }
 
@@ -266,7 +288,7 @@ export const seedFirestoreIfEmpty = async (orgId: string = 'org-astracloud') => 
       if (invSnap.empty) {
         console.log(`Seeding initial invoices for tenant ${orgId} to Firestore...`);
         for (const invoice of INITIAL_INVOICES) {
-          await setDoc(doc(db, `organizations/${orgId}/invoices`, invoice.id), invoice);
+          await setDoc(doc(db, `organizations/${orgId}/invoices`, invoice.id), sanitizeForFirestore(invoice));
         }
       }
     }
@@ -299,7 +321,7 @@ export const fetchOrganizationsFromFirestore = async (): Promise<Organization[]>
 
 export const createOrganizationInFirestore = async (newOrg: Organization) => {
   try {
-    await setDoc(doc(db, 'organizations', newOrg.id), newOrg);
+    await setDoc(doc(db, 'organizations', newOrg.id), sanitizeForFirestore(newOrg));
     if (newOrg.id === 'org-astracloud') {
       await seedFirestoreIfEmpty(newOrg.id);
     }
@@ -314,7 +336,7 @@ export const updateOrganizationStatusInFirestore = async (
   status: 'Active' | 'Pending Approval' | 'Suspended'
 ) => {
   try {
-    await updateDoc(doc(db, 'organizations', orgId), { status });
+    await updateDoc(doc(db, 'organizations', orgId), sanitizeForFirestore({ status }));
   } catch (error) {
     console.error(`Error updating status for org ${orgId}:`, error);
     throw error;
@@ -348,7 +370,7 @@ export const fetchCampaignsFromFirestore = async (orgId: string): Promise<Campai
 
 export const saveCampaignToFirestore = async (orgId: string, campaign: Campaign) => {
   try {
-    await setDoc(doc(db, `organizations/${orgId}/campaigns`, campaign.id), campaign);
+    await setDoc(doc(db, `organizations/${orgId}/campaigns`, campaign.id), sanitizeForFirestore(campaign));
   } catch (error) {
     console.error(`Error saving campaign ${campaign.id} to Firestore:`, error);
     throw error;
@@ -362,7 +384,7 @@ export const updateCampaignStatusInFirestore = async (
 ) => {
   try {
     const campaignRef = doc(db, `organizations/${orgId}/campaigns`, campaignId);
-    await updateDoc(campaignRef, { status });
+    await updateDoc(campaignRef, sanitizeForFirestore({ status }));
   } catch (error) {
     console.error(`Error updating campaign status:`, error);
   }
@@ -395,7 +417,7 @@ export const fetchInvoicesFromFirestore = async (orgId: string): Promise<Invoice
 
 export const saveInvoiceToFirestore = async (orgId: string, invoice: Invoice) => {
   try {
-    await setDoc(doc(db, `organizations/${orgId}/invoices`, invoice.id), invoice);
+    await setDoc(doc(db, `organizations/${orgId}/invoices`, invoice.id), sanitizeForFirestore(invoice));
   } catch (error) {
     console.error(`Error saving invoice:`, error);
   }
@@ -410,11 +432,11 @@ export const updateInvoiceStatusInFirestore = async (
 ) => {
   try {
     const invRef = doc(db, `organizations/${orgId}/invoices`, invoiceId);
-    await updateDoc(invRef, {
+    await updateDoc(invRef, sanitizeForFirestore({
       status,
       ...(paymentMethod && { paymentMethod }),
       ...(txHash && { txHash }),
-    });
+    }));
   } catch (error) {
     console.error('Error updating invoice status in Firestore:', error);
   }
@@ -456,7 +478,7 @@ export const fetchChannelsFromFirestore = async (orgId: string): Promise<Channel
 
 export const saveChannelToFirestore = async (orgId: string, channel: ChannelApiStatus) => {
   try {
-    await setDoc(doc(db, `organizations/${orgId}/channels`, channel.platform), channel);
+    await setDoc(doc(db, `organizations/${orgId}/channels`, channel.platform), sanitizeForFirestore(channel));
   } catch (error) {
     console.error('Error saving channel to Firestore:', error);
   }
@@ -471,7 +493,7 @@ export const submitContactLeadToFirestore = async (lead: Omit<ContactLead, 'subm
       submittedAt: new Date().toISOString(),
       status: 'NEW',
     };
-    const docRef = await addDoc(leadsRef, newLead);
+    const docRef = await addDoc(leadsRef, sanitizeForFirestore(newLead));
     return docRef.id;
   } catch (error) {
     console.error('Error submitting contact lead:', error);
@@ -506,7 +528,7 @@ export const fetchChannelCredentialsFromFirestore = async (orgId: string): Promi
     if (snap.empty) {
       // Seed default initial credentials
       for (const [platform, creds] of Object.entries(DEFAULT_CHANNEL_CREDENTIALS)) {
-        await setDoc(doc(db, `organizations/${orgId}/credentials`, platform), creds);
+        await setDoc(doc(db, `organizations/${orgId}/credentials`, platform), sanitizeForFirestore(creds));
       }
       return DEFAULT_CHANNEL_CREDENTIALS;
     }
@@ -524,7 +546,7 @@ export const fetchChannelCredentialsFromFirestore = async (orgId: string): Promi
 
 export const saveChannelCredentialsToFirestore = async (orgId: string, creds: ChannelCredentials) => {
   try {
-    await setDoc(doc(db, `organizations/${orgId}/credentials`, creds.platform), creds);
+    await setDoc(doc(db, `organizations/${orgId}/credentials`, creds.platform), sanitizeForFirestore(creds));
   } catch (error) {
     console.warn(`Error saving credentials for ${creds.platform}:`, error);
   }
@@ -644,7 +666,7 @@ export const resolveAuthorizedOrgForUser = async (
       orgId: 'org-astracloud',
       createdAt: new Date().toISOString(),
     };
-    await setDoc(doc(db, 'users', uid), profile, { merge: true });
+    await setDoc(doc(db, 'users', uid), sanitizeForFirestore(profile), { merge: true });
     return { status: 'AUTHORIZED', profile };
   }
 
@@ -669,12 +691,12 @@ export const resolveAuthorizedOrgForUser = async (
     permissions: invite.permissions,
   };
 
-  await setDoc(doc(db, 'users', uid), profile);
+  await setDoc(doc(db, 'users', uid), sanitizeForFirestore(profile));
   try {
-    await updateDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), {
+    await updateDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), sanitizeForFirestore({
       status: 'ACCEPTED',
       acceptedAt: new Date().toISOString(),
-    });
+    }));
   } catch (err) {
     console.warn('Could not update invitedEmployees status:', err);
   }
@@ -716,19 +738,19 @@ export const onboardNewOrganization = async (
     locale,
   };
 
-  await setDoc(doc(db, 'organizations', orgId), newOrg);
+  await setDoc(doc(db, 'organizations', orgId), sanitizeForFirestore(newOrg));
   await seedFirestoreIfEmpty(orgId);
 
   // The founder is auto-authorized as an ACCEPTED admin employee of their
   // own new org -- no invite step needed for the person creating it.
-  await setDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), {
+  await setDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), sanitizeForFirestore({
     email: email.trim().toLowerCase(),
     role: 'TENANT_ADMIN',
     status: 'ACCEPTED',
     invitedBy: email,
     invitedAt: new Date().toISOString(),
     acceptedAt: new Date().toISOString(),
-  } as InvitedEmployee);
+  } as InvitedEmployee));
 
   const profile: UserProfile = {
     uid,
@@ -738,7 +760,7 @@ export const onboardNewOrganization = async (
     orgId,
     createdAt: new Date().toISOString(),
   };
-  await setDoc(doc(db, 'users', uid), profile);
+  await setDoc(doc(db, 'users', uid), sanitizeForFirestore(profile));
 
   return profile;
 };
@@ -759,7 +781,7 @@ export const inviteEmployeeToOrg = async (
     invitedAt: new Date().toISOString(),
     ...(permissions ? { permissions } : {}),
   };
-  await setDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), invite);
+  await setDoc(doc(db, `organizations/${orgId}/invitedEmployees`, emailToDocId(email)), sanitizeForFirestore(invite));
 };
 
 export const listInvitedEmployees = async (orgId: string): Promise<InvitedEmployee[]> => {
@@ -788,7 +810,7 @@ export interface WizardDraft {
 export const saveWizardDraftToFirestore = async (orgId: string, draft: WizardDraft) => {
   try {
     const draftRef = doc(db, `organizations/${orgId}/wizardDrafts`, draft.id);
-    await setDoc(draftRef, draft);
+    await setDoc(draftRef, sanitizeForFirestore(draft));
   } catch (error) {
     console.error(`Error saving wizard draft to Firestore:`, error);
   }

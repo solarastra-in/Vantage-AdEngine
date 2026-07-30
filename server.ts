@@ -136,7 +136,7 @@ app.post('/api/campaigns', (req, res) => {
       callToAction: 'Learn More',
       mediaUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=800&q=80',
     },
-    platformCreatives: body.platformCreatives || undefined,
+    ...(body.platformCreatives && { platformCreatives: body.platformCreatives }),
     channels: body.channels || [],
     publishStatuses: (body.channels || []).map((ch: any) => ({
       platform: ch.platform,
@@ -255,9 +255,9 @@ app.post('/api/campaigns/:id/publish', async (req, res) => {
     campaign.publishStatuses = report.results.map(r => ({
       platform: r.platform,
       status: r.outcome === 'LIVE' ? 'live' : r.outcome === 'ROLLED_BACK' ? 'draft' : 'failed',
-      externalId: r.externalId,
-      publishedAt: r.outcome === 'LIVE' ? new Date().toISOString() : undefined,
-      error: r.error,
+      ...(r.externalId && { externalId: r.externalId }),
+      ...(r.outcome === 'LIVE' && { publishedAt: new Date().toISOString() }),
+      ...(r.error && { error: r.error }),
     }));
 
     if (report.overallStatus !== 'ALL_FAILED') {
