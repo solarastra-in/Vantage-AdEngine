@@ -154,8 +154,13 @@ export const AiAdStudio: React.FC<AiAdStudioProps> = ({ onOpenWizardWithAiData }
                 name: prompt,
                 objective,
                 targetAudience: result.suggestedTargeting,
-                headline: result.improvedHeadlines[0],
-                primaryText: result.improvedPrimaryText[0],
+                headline: result.improvedHeadlines?.[0] || '',
+                primaryText: result.improvedPrimaryText?.[0] || '',
+                improvedHeadlines: result.improvedHeadlines,
+                improvedPrimaryText: result.improvedPrimaryText,
+                suggestedGoogleKeywords: result.suggestedGoogleKeywords,
+                recommendedBudgetDistribution: result.recommendedBudgetDistribution,
+                diagnosticReport: result.diagnosticReport,
               })}
               className="bg-amber-400 hover:bg-amber-300 text-black px-4 py-2 text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-2 rounded-xs shadow-md"
             >

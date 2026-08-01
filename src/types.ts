@@ -187,6 +187,7 @@ export interface AiOptimizationResult {
   improvedHeadlines: string[];
   improvedPrimaryText: string[];
   suggestedTargeting: string;
+  suggestedGoogleKeywords?: string[];
   recommendedBudgetDistribution: { platform: string; percent: number; reason: string }[];
   diagnosticReport: string;
 }

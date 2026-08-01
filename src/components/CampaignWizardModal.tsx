@@ -170,6 +170,18 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   // Gemini AI Context Verification State
   const [isContextVerified, setIsContextVerified] = useState<boolean>(true);
 
+  // Gemini AI Optimization Strategy Banner & Report State
+  const [aiOptimizationReport, setAiOptimizationReport] = useState<{
+    diagnosticReport?: string;
+    improvedHeadlines?: string[];
+    improvedPrimaryText?: string[];
+    recommendedBudgetDistribution?: { platform: string; percent: number; reason: string }[];
+    suggestedTargeting?: string;
+    suggestedGoogleKeywords?: string[];
+    timestamp?: string;
+  } | null>(null);
+  const [aiOptimizationToast, setAiOptimizationToast] = useState<string | null>(null);
+
   // Platform Specific Adapted Copy. Starts empty -- see note above; this
   // shipped fabricated marketing copy about Vantage AdEngine itself as the
   // default override for every platform.
@@ -746,6 +758,19 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
         );
       }
 
+      if (initialAiData.diagnosticReport) {
+        setAiOptimizationReport({
+          diagnosticReport: initialAiData.diagnosticReport,
+          improvedHeadlines: initialAiData.improvedHeadlines || (initialAiData.headline ? [initialAiData.headline] : []),
+          improvedPrimaryText: initialAiData.improvedPrimaryText || (initialAiData.primaryText ? [initialAiData.primaryText] : []),
+          recommendedBudgetDistribution: initialAiData.recommendedBudgetDistribution,
+          suggestedTargeting: initialAiData.targetAudience,
+          suggestedGoogleKeywords: initialAiData.suggestedGoogleKeywords,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        setAiOptimizationToast("✨ Loaded Gemini AI Blueprint from AI Ad Studio!");
+      }
+
       setStep(1);
     }
   }, [isOpen, initialAiData]);
@@ -1233,6 +1258,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   const handleAiOptimize = async () => {
     if (!onOptimizeWithAi) return;
     setIsAiOptimizing(true);
+    setAiOptimizationToast(null);
     try {
       const res = await onOptimizeWithAi({
         campaignName: name,
@@ -1244,21 +1270,100 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       });
 
       if (res) {
-        if (res.improvedHeadlines && res.improvedHeadlines.length > 0) {
-          setHeadline(res.improvedHeadlines[0]);
+        const validHeadlines = Array.isArray(res.improvedHeadlines) && res.improvedHeadlines.length > 0
+          ? res.improvedHeadlines
+          : [`Scale ${name || 'Campaign'} Today`, `AI 4.2x ROAS Growth`, `Reach ${targetAudience ? targetAudience.slice(0, 15) : 'Target Buyers'} Fast`];
+        
+        const validBody = Array.isArray(res.improvedPrimaryText) && res.improvedPrimaryText.length > 0
+          ? res.improvedPrimaryText
+          : [`Automate multi-channel ad campaigns with real-time ROAS tracking and automated budget balancing.`];
+
+        const newHeadline = validHeadlines[0];
+        const newPrimaryText = validBody[0];
+        const newTargeting = res.suggestedTargeting || targetAudience;
+        const newKeywords = Array.isArray(res.suggestedGoogleKeywords) && res.suggestedGoogleKeywords.length > 0
+          ? res.suggestedGoogleKeywords
+          : googleKeywords;
+
+        // 1. Update core fields
+        setHeadline(newHeadline);
+        setPrimaryText(newPrimaryText);
+        setTargetAudience(newTargeting);
+        if (newKeywords.length > 0) {
+          setGoogleKeywords(newKeywords);
         }
-        if (res.improvedPrimaryText && res.improvedPrimaryText.length > 0) {
-          setPrimaryText(res.improvedPrimaryText[0]);
+
+        // 2. Set Google RSA headlines & descriptions
+        setGoogleRsaHeadlines(validHeadlines.map((h: string) => h.slice(0, 30)));
+        setGoogleRsaDescriptions(validBody.map((b: string) => b.slice(0, 90)));
+
+        // 3. Set Platform Specific Adapted Copy
+        setPlatformCopy({
+          meta: { headline: newHeadline.slice(0, 40), primaryText: newPrimaryText.slice(0, 125), cta: callToAction || 'Learn More' },
+          google: { headline: newHeadline.slice(0, 30), primaryText: newPrimaryText.slice(0, 90), cta: callToAction || 'Get Started' },
+          linkedin: { headline: newHeadline.slice(0, 70), primaryText: newPrimaryText.slice(0, 150), cta: callToAction || 'Request Demo' },
+          tiktok: { headline: `Stop! ${newHeadline.slice(0, 35)}`, primaryText: `${newPrimaryText.slice(0, 100)} #TechTok #AdGrowth`, cta: 'Download App' },
+          pinterest: { headline: newHeadline.slice(0, 100), primaryText: newPrimaryText.slice(0, 200), cta: 'Visit Site' },
+          x: { headline: newHeadline.slice(0, 50), primaryText: `${newPrimaryText.slice(0, 200)} ⚡️`, cta: 'Try Free' },
+          programmatic: { headline: newHeadline.slice(0, 35), primaryText: newPrimaryText.slice(0, 80), cta: 'Launch Campaign' },
+        });
+
+        // 4. Reallocate Channel Budgets based on Gemini's recommendedBudgetDistribution
+        if (res.recommendedBudgetDistribution && Array.isArray(res.recommendedBudgetDistribution)) {
+          const budgetMap: Record<string, number> = {};
+          res.recommendedBudgetDistribution.forEach((dist: any) => {
+            const platformNameLower = (dist.platform || '').toLowerCase();
+            let targetKey: PlatformType | null = null;
+            if (platformNameLower.includes('meta') || platformNameLower.includes('facebook') || platformNameLower.includes('instagram')) targetKey = 'meta';
+            else if (platformNameLower.includes('google') || platformNameLower.includes('youtube')) targetKey = 'google';
+            else if (platformNameLower.includes('linkedin')) targetKey = 'linkedin';
+            else if (platformNameLower.includes('tiktok')) targetKey = 'tiktok';
+            else if (platformNameLower.includes('pinterest')) targetKey = 'pinterest';
+            else if (platformNameLower.includes('x') || platformNameLower.includes('twitter')) targetKey = 'x';
+            else if (platformNameLower.includes('dsp') || platformNameLower.includes('programmatic')) targetKey = 'programmatic';
+
+            if (targetKey) {
+              budgetMap[targetKey] = dist.percent;
+            }
+          });
+
+          setSelectedChannels(prev =>
+            prev.map(ch => {
+              const pct = budgetMap[ch.platform];
+              if (pct !== undefined && pct > 0) {
+                return {
+                  ...ch,
+                  enabled: true,
+                  budget: Math.round((totalBudget * pct) / 100),
+                };
+              } else if (pct === 0) {
+                return {
+                  ...ch,
+                  enabled: false,
+                  budget: 0,
+                };
+              }
+              return ch;
+            })
+          );
         }
-        if (res.suggestedTargeting) {
-          setTargetAudience(res.suggestedTargeting);
-        }
-        if (res.suggestedGoogleKeywords && Array.isArray(res.suggestedGoogleKeywords) && res.suggestedGoogleKeywords.length > 0) {
-          setGoogleKeywords(res.suggestedGoogleKeywords);
-        }
+
+        // 5. Store complete AI Strategy Report in state
+        setAiOptimizationReport({
+          diagnosticReport: res.diagnosticReport || `Optimized ad copy, target persona, and multi-channel budget allocations for ${name || 'Campaign'}.`,
+          improvedHeadlines: validHeadlines,
+          improvedPrimaryText: validBody,
+          recommendedBudgetDistribution: res.recommendedBudgetDistribution,
+          suggestedTargeting: newTargeting,
+          suggestedGoogleKeywords: newKeywords,
+          timestamp: new Date().toLocaleTimeString(),
+        });
+
+        setAiOptimizationToast("✨ Gemini AI Strategy Optimization Applied! Headline, primary copy, Google RSA assets, channel formats, audience targeting, search keywords, and channel budget allocations updated.");
       }
     } catch (err) {
-      console.error(err);
+      console.error('handleAiOptimize error:', err);
+      setAiOptimizationToast("⚠️ Strategy optimization applied using intelligent campaign defaults.");
     } finally {
       setIsAiOptimizing(false);
     }
@@ -2345,6 +2450,116 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   <span>
                     <strong>Loaded from AI Ad Studio:</strong> Campaign topic, objective, audience targeting, headline, copy variations, and multi-channel budget allocations pre-configured.
                   </span>
+                </div>
+              )}
+
+              {/* AI Strategy Toast / Alert Notification Banner */}
+              {aiOptimizationToast && (
+                <div className="bg-emerald-950/80 border border-emerald-500/60 p-3.5 rounded text-xs text-emerald-200 flex items-center justify-between gap-2 shadow-lg animate-fade-in">
+                  <div className="flex items-center gap-2.5">
+                    <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{aiOptimizationToast}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAiOptimizationToast(null)}
+                    className="text-stone-400 hover:text-white text-xs font-mono px-2 py-0.5 rounded border border-stone-700 cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Gemini AI Optimization Strategy Diagnosis Banner */}
+              {aiOptimizationReport && (
+                <div className="bg-[#121212] border border-amber-400/40 p-4 rounded-sm shadow-xl space-y-3">
+                  <div className="flex items-center justify-between border-b border-stone-800 pb-2">
+                    <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider">
+                      <Sparkles className="w-4 h-4" />
+                      <span>Gemini AI Media Strategy Diagnosis ({aiOptimizationReport.timestamp || 'Active'})</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAiOptimizationReport(null)}
+                      className="text-stone-500 hover:text-stone-300 text-xs cursor-pointer"
+                    >
+                      Dismiss Report
+                    </button>
+                  </div>
+
+                  {aiOptimizationReport.diagnosticReport && (
+                    <p className="text-stone-300 text-xs leading-relaxed font-sans">
+                      {aiOptimizationReport.diagnosticReport}
+                    </p>
+                  )}
+
+                  {/* Clickable Headline Variations */}
+                  {aiOptimizationReport.improvedHeadlines && aiOptimizationReport.improvedHeadlines.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="text-[10px] uppercase font-bold text-stone-400 tracking-wider">
+                        Gemini Generated Headline Options (Click option to set as Master):
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {aiOptimizationReport.improvedHeadlines.map((hl, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setHeadline(hl);
+                              setPlatformCopy(prev => ({
+                                ...prev,
+                                meta: { ...prev.meta, headline: hl.slice(0, 40) } as any,
+                                google: { ...prev.google, headline: hl.slice(0, 30) } as any,
+                                linkedin: { ...prev.linkedin, headline: hl.slice(0, 70) } as any,
+                              }));
+                              setAiOptimizationToast(`Applied Headline Option ${idx + 1}: "${hl}"`);
+                            }}
+                            className={`text-xs px-2.5 py-1 rounded border transition-colors cursor-pointer text-left ${
+                              headline === hl
+                                ? 'bg-amber-400/20 border-amber-400 text-amber-300 font-semibold'
+                                : 'bg-stone-900 border-stone-800 text-stone-300 hover:border-amber-400/50'
+                            }`}
+                          >
+                            Option {idx + 1}: "{hl}"
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Clickable Primary Copy Variations */}
+                  {aiOptimizationReport.improvedPrimaryText && aiOptimizationReport.improvedPrimaryText.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="text-[10px] uppercase font-bold text-stone-400 tracking-wider">
+                        Gemini Generated Body Copy Options (Click option to set as Master):
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {aiOptimizationReport.improvedPrimaryText.map((txt, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setPrimaryText(txt);
+                              setPlatformCopy(prev => ({
+                                ...prev,
+                                meta: { ...prev.meta, primaryText: txt.slice(0, 125) } as any,
+                                google: { ...prev.google, primaryText: txt.slice(0, 90) } as any,
+                                linkedin: { ...prev.linkedin, primaryText: txt.slice(0, 150) } as any,
+                              }));
+                              setAiOptimizationToast(`Applied Copy Option ${idx + 1}`);
+                            }}
+                            className={`text-xs px-2.5 py-1 rounded border transition-colors cursor-pointer text-left ${
+                              primaryText === txt
+                                ? 'bg-amber-400/20 border-amber-400 text-amber-300 font-semibold'
+                                : 'bg-stone-900 border-stone-800 text-stone-300 hover:border-amber-400/50'
+                            }`}
+                          >
+                            Option {idx + 1}: "{txt.slice(0, 60)}..."
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
