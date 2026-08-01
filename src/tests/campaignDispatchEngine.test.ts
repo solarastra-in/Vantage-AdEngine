@@ -13,6 +13,9 @@ const baseCreative = {
   callToAction: 'Learn More',
   mediaUrl: 'https://example.com/img.jpg',
   destinationUrl: 'https://example.com',
+  googleRsaHeadlines: ['Headline One', 'Headline Two', 'Headline Three'],
+  googleRsaDescriptions: ['Description one for the ad.', 'Description two for the ad.'],
+  googleKeywords: ['test keyword'],
 };
 
 const baseChannel: ChannelBudget = {

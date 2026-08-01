@@ -1,6 +1,10 @@
 import { metaAdapter } from '../lib/adapters/metaAdapter';
 import { googleAdapter } from '../lib/adapters/googleAdapter';
 import { tiktokAdapter } from '../lib/adapters/tiktokAdapter';
+import { linkedinAdapter } from '../lib/adapters/linkedinAdapter';
+import { pinterestAdapter } from '../lib/adapters/pinterestAdapter';
+import { xAdapter } from '../lib/adapters/xAdapter';
+import { programmaticAdapter } from '../lib/adapters/programmaticAdapter';
 import { PlatformPayload } from '../lib/campaignDispatchEngine';
 
 const validPayload: PlatformPayload = {
@@ -13,6 +17,9 @@ const validPayload: PlatformPayload = {
   budget: 1000,
   targeting: 'x',
   issues: [],
+  googleRsaHeadlines: ['Headline One', 'Headline Two', 'Headline Three'],
+  googleRsaDescriptions: ['Description one for the ad.', 'Description two for the ad.'],
+  googleKeywords: ['test keyword'],
 };
 
 describe('live adapters: dry-run fallback with no credential', () => {
@@ -143,5 +150,98 @@ describe('live adapters: real call construction when credential IS present (fetc
     await expect(
       tiktokAdapter.publish(validPayload, { accountId: 'adv_123', secret: 'token' })
     ).rejects.toThrow(/Invalid advertiser_id/);
+  });
+});
+
+describe('live adapters: Meta and TikTok -- REGRESSION GUARDS', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test('meta adapter: a real API failure must propagate as a real error, never a fabricated success', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => JSON.stringify({ error: { message: 'Invalid parameter' } }),
+    } as Response);
+
+    await expect(
+      metaAdapter.publish(validPayload, { accountId: '98230192', secret: 'real_looking_token' })
+    ).rejects.toThrow(/Invalid parameter/);
+  });
+
+  test('meta adapter: a 200 OK with no id field is a real error, not a silently fabricated resource ID', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, text: async () => JSON.stringify({}) } as Response);
+    await expect(
+      metaAdapter.publish(validPayload, { accountId: '98230192', secret: 'real_looking_token' })
+    ).rejects.toThrow(/did not return a campaign ID/);
+  });
+
+  test('tiktok adapter: a 200 OK with code:0 but no campaign_id is a real error, not a silently fabricated resource ID', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, text: async () => JSON.stringify({ code: 0, data: {} }) } as Response);
+    await expect(
+      tiktokAdapter.publish(validPayload, { accountId: 'adv_123', secret: 'real_looking_token' })
+    ).rejects.toThrow(/did not return a campaign_id/);
+  });
+});
+
+describe('live adapters: LinkedIn, Pinterest, X, Programmatic -- REGRESSION GUARDS', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test('linkedin adapter: a real API failure must propagate as a real error, never a fabricated success', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ message: 'ACCESS_DENIED' }),
+    } as Response);
+
+    await expect(
+      linkedinAdapter.publish(validPayload, { accountId: '554109', secret: 'oauth_token', extra: { companyUrn: '1029384' } })
+    ).rejects.toThrow(/ACCESS_DENIED/);
+  });
+
+  test('linkedin adapter: a genuinely successful call returns the real ID from LinkedIn\'s response', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'urn:li:sponsoredCampaign:998877' }),
+    } as Response);
+
+    const result = await linkedinAdapter.publish(validPayload, { accountId: '554109', secret: 'oauth_token' });
+    expect(result.externalId).toBe('urn:li:sponsoredCampaign:998877');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('pinterest adapter: a real API failure must propagate as a real error, never a fabricated success', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => JSON.stringify({ message: 'Invalid access token' }),
+    } as Response);
+
+    await expect(
+      pinterestAdapter.publish(validPayload, { accountId: '54982103', secret: 'oauth_token' })
+    ).rejects.toThrow(/Invalid access token/);
+  });
+
+  test('x adapter: a real API failure must propagate as a real error, never a fabricated success', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => JSON.stringify({ errors: [{ message: 'Invalid funding instrument' }] }),
+    } as Response);
+
+    await expect(
+      xAdapter.publish(validPayload, { accountId: 'x_promoted_10293', secret: 'oauth_token' })
+    ).rejects.toThrow(/Invalid funding instrument/);
+  });
+
+  test('programmatic adapter: a real API failure must propagate as a real error, never a fabricated success', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => JSON.stringify({ Message: 'Internal seat configuration error' }),
+    } as Response);
+
+    await expect(
+      programmaticAdapter.publish(validPayload, { accountId: 'ttd_seat_99210', secret: 'ttd_auth_token' })
+    ).rejects.toThrow(/Internal seat configuration error/);
   });
 });

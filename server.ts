@@ -607,113 +607,72 @@ app.get('/api/oauth/google/callback', async (req, res) => {
   }
 });
 
-const DEFAULT_LIVE_CREDENTIALS: Record<string, { accountId: string; secret: string; extra?: Record<string, string> }> = {
-  google: {
-    accountId: '2330588547',
-    secret: '1//04_google_live_token_verified',
-    extra: { developerToken: 'goog_dev_tok_live' },
-  },
-  meta: {
-    accountId: 'act_99182301',
-    secret: 'EAAG_meta_live_access_token_verified',
-  },
-  linkedin: {
-    accountId: 'urn:li:sponsoredAccount:554109',
-    secret: 'AQV_linkedin_live_access_token_verified',
-    extra: { companyUrn: 'urn:li:organization:1029384' },
-  },
-  tiktok: {
-    accountId: 'tt_adv_883210',
-    secret: 'tt_live_secret_token_verified',
-    extra: { sparkAuthCode: 'spark_auth_771029381' },
-  },
-  pinterest: {
-    accountId: '54982103',
-    secret: 'pina_live_access_token_verified',
-    extra: { companyUrn: 'urn:pin:catalog:883920' },
-  },
-  x: {
-    accountId: 'x_promoted_10293',
-    secret: 'x_bearer_live_token_verified',
-    extra: { developerToken: 'x_client_98231' },
-  },
-  programmatic: {
-    accountId: 'ttd_seat_99210',
-    secret: 'dsp_openrtb_live_secret_verified',
-    extra: { developerToken: 'ssp_partner_7721' },
-  },
-};
-
 async function getResolvedCredential(orgId: string, platform: string): Promise<{ accountId: string; secret: string; extra?: Record<string, string> } | null> {
   loadVaultFromDisk();
   const key = scopedKey(orgId, platform);
-  const fallbackDefaultKey = scopedKey(DEFAULT_ORG_ID, platform);
-  const stored = credentialVault[key] || credentialVault[fallbackDefaultKey] || credentialVault[platform];
-  
-  if (stored) {
-    try {
-      const rawSecretEnv = typeof stored.encryptedSecret === 'string' ? stored.encryptedSecret : stored.encryptedSecret?.envelope;
-      let secret = decryptSecret(rawSecretEnv || '');
-      const extra: Record<string, string> = {};
-      if (stored.encryptedExtra) {
-        for (const [k, env] of Object.entries(stored.encryptedExtra)) {
-          const rawEnv = typeof env === 'string' ? env : (env as any)?.envelope;
-          extra[k] = decryptSecret(rawEnv || '');
-        }
-      }
+  const stored = credentialVault[key];
 
-      if (stored.authMethod === 'oauth2' || (platform === 'google' && secret.startsWith('1//') && !secret.includes('_verified') && !secret.includes('live_token'))) {
-        const cached = accessTokenCache.get(key);
-        if (cached && cached.expiresAt - TOKEN_REFRESH_SKEW_MS > Date.now()) {
-          secret = cached.accessToken;
-        } else {
-          const oauthConfig = getGoogleOAuthConfig();
-          if (oauthConfig) {
-            try {
-              const refreshed = await refreshAccessToken(oauthConfig, secret);
-              accessTokenCache.set(key, { accessToken: refreshed.accessToken, expiresAt: new Date(refreshed.expiresAt).getTime() });
-              secret = refreshed.accessToken;
-            } catch (refErr: any) {
-              console.warn(`[vault] Google refresh token exchange failed for ${key}:`, refErr.message);
-            }
-          } else if (stored.authMethod === 'oauth2') {
-            throw new Error('GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI are not configured server-side; cannot refresh the stored OAuth token.');
-          }
-        }
-      }
-      
-      const defaultFallback = DEFAULT_LIVE_CREDENTIALS[platform];
-      if (!secret || secret.startsWith('••••••••')) {
-        secret = defaultFallback?.secret || `live_token_${platform}_${Date.now()}`;
-      }
-      if (extra.developerToken && extra.developerToken.startsWith('••••••••')) {
-        extra.developerToken = defaultFallback?.extra?.developerToken || 'dev_tok_live';
-      }
+  // No credential configured for this org+platform -- return null, which
+  // the dispatch engine correctly treats as "use the honest DRY_RUN
+  // adapter" (see PlatformAdapter.publish: `if (!credential) return
+  // dryRunResult(...)`). This used to fall through to a hardcoded
+  // DEFAULT_LIVE_CREDENTIALS object with fabricated secrets like
+  // '1//04_google_live_token_verified' for every platform, meaning every
+  // dispatch attempted a REAL API call with fake credentials -- for every
+  // org, even ones that had never configured anything -- instead of
+  // honestly reporting DRY_RUN.
+  if (!stored) return null;
 
-      recordVaultAudit({
-        platform: key,
-        action: 'DECRYPT',
-        actor: 'dispatch-engine',
-        fingerprint: (stored.encryptedSecret as any)?.fingerprint || 'vlt_decrypted',
-        outcome: 'success',
-      });
-      return {
-        accountId: stored.accountId || defaultFallback?.accountId || 'CONFIGURED',
-        secret,
-        extra: Object.keys(extra).length ? extra : defaultFallback?.extra,
-      };
-    } catch (err: any) {
-      console.warn(`[vault] Failed to decrypt credential for ${key}:`, err.message);
+  try {
+    const secret = decryptSecret(typeof stored.encryptedSecret === 'string' ? stored.encryptedSecret : stored.encryptedSecret.envelope);
+    const extra: Record<string, string> = {};
+    if (stored.encryptedExtra) {
+      for (const [k, env] of Object.entries(stored.encryptedExtra)) {
+        const rawEnv = typeof env === 'string' ? env : (env as any)?.envelope;
+        extra[k] = decryptSecret(rawEnv || '');
+      }
     }
-  }
 
-  // Fallback to default live credentials if configured platform has default credentials
-  const defaultLive = DEFAULT_LIVE_CREDENTIALS[platform];
-  if (defaultLive) {
-    return defaultLive;
-  }
+    let resolvedSecret = secret;
+    if (stored.authMethod === 'oauth2') {
+      const cached = accessTokenCache.get(key);
+      if (cached && cached.expiresAt - TOKEN_REFRESH_SKEW_MS > Date.now()) {
+        resolvedSecret = cached.accessToken;
+      } else {
+        const oauthConfig = getGoogleOAuthConfig();
+        if (!oauthConfig) {
+          throw new Error('GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI are not configured server-side; cannot refresh the stored OAuth token.');
+        }
+        const refreshed = await refreshAccessToken(oauthConfig, secret);
+        accessTokenCache.set(key, { accessToken: refreshed.accessToken, expiresAt: new Date(refreshed.expiresAt).getTime() });
+        resolvedSecret = refreshed.accessToken;
+      }
+    }
 
-  return null;
+    recordVaultAudit({
+      platform: key,
+      action: 'DECRYPT',
+      actor: 'dispatch-engine',
+      fingerprint: (stored.encryptedSecret as any)?.fingerprint || 'vlt_decrypted',
+      outcome: 'success',
+    });
+    const { anomalous, countInWindow } = detectAnomalousAccess(key);
+    if (anomalous) {
+      // eslint-disable-next-line no-console
+      console.warn(`[vaultAudit] Anomalous decrypt volume for ${key}: ${countInWindow} decrypts in the last minute.`);
+    }
+    return { accountId: stored.accountId, secret: resolvedSecret, extra: Object.keys(extra).length ? extra : undefined };
+  } catch (err: any) {
+    recordVaultAudit({
+      platform: key,
+      action: 'DECRYPT',
+      actor: 'dispatch-engine',
+      outcome: 'failure',
+      detail: err.message,
+    });
+    console.warn(`[vault] Failed to resolve credential for ${key}:`, err.message);
+    return null;
+  }
 }
 
 // 3. Channels & API Nexus
@@ -791,13 +750,12 @@ app.get('/api/channels/credentials-info', (req, res) => {
   ];
 
   const channelsInfo = platformMeta.map(p => {
-    const stored = credentialVault[scopedKey(orgId, p.platform)] || credentialVault[scopedKey(DEFAULT_ORG_ID, p.platform)] || credentialVault[p.platform];
-    const defaultLive = DEFAULT_LIVE_CREDENTIALS[p.platform];
-    const isConfigured = !!(stored || defaultLive);
+    const stored = credentialVault[scopedKey(orgId, p.platform)];
+    const isConfigured = !!stored;
     return {
       ...p,
       status: isConfigured ? 'LIVE_CREDENTIALS_CONFIGURED' : 'DRY_RUN_NO_CREDENTIALS',
-      accountId: stored?.accountId || defaultLive?.accountId || '',
+      accountId: stored?.accountId || '',
     };
   });
 
