@@ -13,40 +13,29 @@ export const programmaticAdapter: PlatformAdapter = {
 
     const { accountId, secret, extra } = credential; // accountId = DSP seat ID
 
-    if (
-      secret.includes('_verified') ||
-      secret.includes('live_secret') ||
-      secret.startsWith('dsp_openrtb_live') ||
-      secret.startsWith('mock_')
-    ) {
-      return { externalId: `dsp_cmp_${accountId}_${Date.now()}`, mode: 'LIVE' as const };
+    const url = 'https://api.thetradedesk.com/v3/campaign';
+
+    const body = await callPlatformApi(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'TTD-Auth': secret },
+        body: JSON.stringify({
+          SeatId: accountId,
+          CampaignName: payload.headline,
+          Budget: { Amount: payload.budget, CurrencyCode: 'USD' },
+          BidFloorCpm: extra?.bidFloorCpm ? Number(extra.bidFloorCpm) : 2.5,
+          IsEnabled: false, // land paused
+        }),
+      },
+      'Programmatic DSP API'
+    );
+
+    const externalId = body?.CampaignId ?? body?.campaignId;
+    if (!externalId) {
+      throw new Error('Programmatic DSP API did not return a campaign ID.');
     }
-
-    try {
-      const url = 'https://api.thetradedesk.com/v3/campaign';
-
-      const body = await callPlatformApi(
-        url,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'TTD-Auth': secret },
-          body: JSON.stringify({
-            SeatId: accountId,
-            CampaignName: payload.headline,
-            Budget: { Amount: payload.budget, CurrencyCode: 'USD' },
-            BidFloorCpm: extra?.bidFloorCpm ? Number(extra.bidFloorCpm) : 2.5,
-            IsEnabled: false, // land paused
-          }),
-        },
-        'Programmatic DSP API'
-      );
-
-      const externalId = body?.CampaignId ?? body?.campaignId ?? `dsp_cmp_${accountId}_${Date.now()}`;
-      return { externalId: String(externalId), mode: 'LIVE' as const };
-    } catch (err: any) {
-      console.warn('[programmaticAdapter] Real API notice, falling back to live resource ID:', err.message);
-      return { externalId: `dsp_cmp_${accountId}_${Date.now()}`, mode: 'LIVE' as const };
-    }
+    return { externalId: String(externalId), mode: 'LIVE' as const };
   },
 
   async rollback(externalId: string, credential: ResolvedCredential | null) {

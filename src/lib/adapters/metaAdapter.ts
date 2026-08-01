@@ -21,15 +21,6 @@ export const metaAdapter: PlatformAdapter = {
 
     const { accountId, secret } = credential;
 
-    if (
-      secret.includes('_verified') ||
-      secret.includes('live_token') ||
-      secret.startsWith('EAAG_meta_live') ||
-      secret.startsWith('mock_')
-    ) {
-      return { externalId: `act_${accountId}_${Date.now()}`, mode: 'LIVE' as const };
-    }
-
     const url = `https://graph.facebook.com/${GRAPH_VERSION}/act_${accountId}/campaigns`;
 
     const body = await callPlatformApi(
@@ -48,7 +39,11 @@ export const metaAdapter: PlatformAdapter = {
       'Meta Marketing API'
     );
 
-    return { externalId: body?.id || `act_${accountId}_${Date.now()}`, mode: 'LIVE' as const };
+    if (!body?.id) {
+      throw new Error('Meta Marketing API did not return a campaign ID.');
+    }
+
+    return { externalId: body.id, mode: 'LIVE' as const };
   },
 
   async rollback(externalId: string, credential: ResolvedCredential | null) {

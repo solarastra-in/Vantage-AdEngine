@@ -17,47 +17,36 @@ export const linkedinAdapter: PlatformAdapter = {
 
     const { accountId, secret, extra } = credential;
 
-    if (
-      secret.includes('_verified') ||
-      secret.includes('live_token') ||
-      secret.startsWith('AQV_linkedin_live') ||
-      secret.startsWith('mock_')
-    ) {
-      return { externalId: `urn:li:sponsoredAccount:${accountId}_${Date.now()}`, mode: 'LIVE' as const };
-    }
+    const url = 'https://api.linkedin.com/rest/adCampaigns';
 
-    try {
-      const url = 'https://api.linkedin.com/rest/adCampaigns';
-
-      const body = await callPlatformApi(
-        url,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${secret}`,
-            'LinkedIn-Version': LI_API_VERSION,
-            'X-Restli-Protocol-Version': '2.0.0',
-          },
-          body: JSON.stringify({
-            account: `urn:li:sponsoredAccount:${accountId}`,
-            name: payload.headline,
-            type: 'SPONSORED_UPDATES',
-            status: 'DRAFT',
-            costType: 'CPM',
-            dailyBudget: { amount: String(payload.budget), currencyCode: 'USD' },
-            ...(extra?.companyUrn ? { associatedEntity: `urn:li:organization:${extra.companyUrn}` } : {}),
-          }),
+    const body = await callPlatformApi(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${secret}`,
+          'LinkedIn-Version': LI_API_VERSION,
+          'X-Restli-Protocol-Version': '2.0.0',
         },
-        'LinkedIn Marketing API'
-      );
+        body: JSON.stringify({
+          account: `urn:li:sponsoredAccount:${accountId}`,
+          name: payload.headline,
+          type: 'SPONSORED_UPDATES',
+          status: 'DRAFT',
+          costType: 'CPM',
+          dailyBudget: { amount: String(payload.budget), currencyCode: 'USD' },
+          ...(extra?.companyUrn ? { associatedEntity: `urn:li:organization:${extra.companyUrn}` } : {}),
+        }),
+      },
+      'LinkedIn Marketing API'
+    );
 
-      const externalId = body?.id ?? body?.value?.id ?? `urn:li:sponsoredAccount:${accountId}_${Date.now()}`;
-      return { externalId: String(externalId), mode: 'LIVE' as const };
-    } catch (err: any) {
-      console.warn('[linkedinAdapter] Real API notice, falling back to live resource ID:', err.message);
-      return { externalId: `urn:li:sponsoredAccount:${accountId}_${Date.now()}`, mode: 'LIVE' as const };
+    const externalId = body?.id ?? body?.value?.id;
+    if (!externalId) {
+      throw new Error('LinkedIn Marketing API did not return a campaign ID.');
     }
+    return { externalId: String(externalId), mode: 'LIVE' as const };
   },
 
   async rollback(externalId: string, credential: ResolvedCredential | null) {

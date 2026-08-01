@@ -42,14 +42,6 @@ function normalizeCustomerId(accountId: string): string {
  * server-side; none of that exists in this codebase yet.
  */
 function validateAccessTokenFormat(secret: string): void {
-  if (
-    secret.includes('_verified') ||
-    secret.includes('live_token') ||
-    secret.startsWith('1//04_google') ||
-    secret.startsWith('mock_')
-  ) {
-    return;
-  }
   if (secret.startsWith('4/')) {
     throw new Error(
       'This looks like a Google OAuth2 authorization CODE (starts with "4/"), not an access token. ' +
@@ -100,32 +92,18 @@ export const googleAdapter: PlatformAdapter = {
       throw new Error(`Google Ads customer ID "${credential.accountId}" doesn't contain any digits after normalization -- check the account ID entered in API Nexus.`);
     }
 
-    if (
-      secret.includes('_verified') ||
-      secret.includes('live_token') ||
-      secret.startsWith('1//04_google') ||
-      secret.startsWith('mock_') ||
-      secret.includes('test') ||
-      secret.includes('demo') ||
-      (extra?.developerToken && (extra.developerToken.includes('mock') || extra.developerToken.includes('test') || extra.developerToken.includes('verified')))
-    ) {
-      return { externalId: `customers/${accountId}/campaigns/cmp_${Date.now()}`, mode: 'LIVE' as const };
-    }
-
     const developerToken = extra?.developerToken;
     if (!developerToken) {
       throw new Error('Google Ads requires a developer token in addition to the OAuth2 access token.');
     }
 
-    try {
-
-    // 1. Create Campaign Budget first in Google Ads API. A real error here
+    // 1. Create Campaign Budget first in Google Ads API.
+    const budgetUrl = `https://googleads.googleapis.com/${API_VERSION}/customers/${accountId}/campaignBudgets:mutate`;
     // MUST propagate as a real error -- previously this caught any
     // failure and silently continued with a placeholder budget resource
     // name, which then made the campaign creation call below fail too,
     // ALSO silently, resulting in a fabricated "LIVE" success being
     // reported for a campaign that was never actually created.
-    const budgetUrl = `https://googleads.googleapis.com/${API_VERSION}/customers/${accountId}/campaignBudgets:mutate`;
     const budgetRes = await callPlatformApi(
       budgetUrl,
       {
@@ -310,25 +288,13 @@ export const googleAdapter: PlatformAdapter = {
     );
 
     return { externalId: resourceName, mode: 'LIVE' as const };
-    } catch (err: any) {
-      console.warn('[googleAdapter] Google Ads API execution notice, proceeding with verified target ID:', err.message);
-      return { externalId: `customers/${accountId}/campaigns/cmp_${Date.now()}`, mode: 'LIVE' as const };
-    }
   },
 
   async rollback(externalId: string, credential: ResolvedCredential | null) {
     if (!credential) return;
     const { secret, extra } = credential;
-    if (
-      secret.includes('_verified') ||
-      secret.includes('live_token') ||
-      secret.startsWith('1//04_google') ||
-      secret.startsWith('mock_') ||
-      externalId.includes('DRYRUN') ||
-      externalId.includes('cmp_')
-    ) {
-      return;
-    }
+    if (externalId.includes('DRYRUN')) return;
+    
     try {
       const accountId = normalizeCustomerId(credential.accountId);
       const url = `https://googleads.googleapis.com/${API_VERSION}/customers/${accountId}/campaigns:mutate`;
@@ -354,14 +320,7 @@ export const googleAdapter: PlatformAdapter = {
     if (!credential) return dryRunPerformance('google', externalId, dateRange);
 
     const { secret, extra } = credential;
-    if (
-      secret.includes('_verified') ||
-      secret.includes('live_token') ||
-      secret.startsWith('1//04_google') ||
-      secret.startsWith('mock_') ||
-      externalId.includes('DRYRUN') ||
-      externalId.includes('cmp_')
-    ) {
+    if (externalId.includes('DRYRUN')) {
       return dryRunPerformance('google', externalId, dateRange);
     }
 
