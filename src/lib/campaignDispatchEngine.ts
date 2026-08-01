@@ -92,10 +92,15 @@ export interface PlatformPayload {
   headline: string;
   primaryText: string;
   mediaUrl: string;
+  destinationUrl: string;
   callToAction: string;
   budget: number;
   targeting: string;
   issues: TransformIssue[];
+  /** Only meaningfully used by the Google adapter, but carried generically since they live on the shared creative. */
+  googleRsaHeadlines?: string[];
+  googleRsaDescriptions?: string[];
+  googleKeywords?: string[];
 }
 
 /**
@@ -135,7 +140,16 @@ export function transformForPlatform(
   // didn't specifically tailor copy for.
   const override = campaign.platformCreatives?.[channel.platform];
   const creative: AdCreative = override
-    ? { headline: override.headline, primaryText: override.primaryText, callToAction: override.callToAction, mediaUrl: override.mediaUrl || campaign.creative.mediaUrl }
+    ? {
+        headline: override.headline,
+        primaryText: override.primaryText,
+        callToAction: override.callToAction,
+        mediaUrl: override.mediaUrl || campaign.creative.mediaUrl,
+        destinationUrl: campaign.creative.destinationUrl,
+        googleRsaHeadlines: campaign.creative.googleRsaHeadlines,
+        googleRsaDescriptions: campaign.creative.googleRsaDescriptions,
+        googleKeywords: campaign.creative.googleKeywords,
+      }
     : campaign.creative;
 
   let headline = creative.headline;
@@ -168,8 +182,27 @@ export function transformForPlatform(
     issues.push({ field: 'mediaUrl', issue: 'No creative media URL supplied', severity: 'error' });
   }
 
+  if (!creative.destinationUrl) {
+    issues.push({ field: 'destinationUrl', issue: 'No destination/landing page URL supplied -- required to create a real ad on any platform', severity: 'error' });
+  }
+
   if (!channel.budget || channel.budget <= 0) {
     issues.push({ field: 'budget', issue: 'Channel budget must be > 0', severity: 'error' });
+  }
+
+  if (channel.platform === 'google') {
+    const headlines = creative.googleRsaHeadlines ?? [];
+    const descriptions = creative.googleRsaDescriptions ?? [];
+    const keywords = creative.googleKeywords ?? [];
+    if (headlines.length < 3) {
+      issues.push({ field: 'googleRsaHeadlines', issue: `Google Search ads require at least 3 headlines (have ${headlines.length})`, severity: 'error' });
+    }
+    if (descriptions.length < 2) {
+      issues.push({ field: 'googleRsaDescriptions', issue: `Google Search ads require at least 2 descriptions (have ${descriptions.length})`, severity: 'error' });
+    }
+    if (keywords.length < 1) {
+      issues.push({ field: 'googleKeywords', issue: 'Google Search ads require at least one keyword to match against -- without one, the campaign will never serve', severity: 'error' });
+    }
   }
 
   return {
@@ -177,10 +210,14 @@ export function transformForPlatform(
     headline,
     primaryText,
     mediaUrl: creative.mediaUrl,
+    destinationUrl: creative.destinationUrl,
     callToAction: creative.callToAction,
     budget: channel.budget,
     targeting: channel.targeting,
     issues,
+    googleRsaHeadlines: creative.googleRsaHeadlines,
+    googleRsaDescriptions: creative.googleRsaDescriptions,
+    googleKeywords: creative.googleKeywords,
   };
 }
 

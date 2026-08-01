@@ -16,6 +16,19 @@ export interface AdCreative {
   primaryText: string;
   callToAction: string;
   mediaUrl: string;
+  /**
+   * The landing page a click sends someone to. Every real ad platform
+   * requires this to create an actual ad -- it was missing from this
+   * type entirely, meaning no ad could ever be created beyond an empty
+   * campaign/budget shell no matter how correct everything else was.
+   */
+  destinationUrl: string;
+  /** Google Search RSA requires 3-15 headlines (<=30 chars each). */
+  googleRsaHeadlines?: string[];
+  /** Google Search RSA requires 2-4 descriptions (<=90 chars each). */
+  googleRsaDescriptions?: string[];
+  /** Search keywords for the Google Ads ad group -- without these, a Search campaign has nothing to match queries against and will never serve. */
+  googleKeywords?: string[];
 }
 
 export interface PlatformPublishStatus {
@@ -68,6 +81,18 @@ export interface PlatformCreativeOverride {
   mediaUrl?: string;
 }
 
+export interface CampaignActivityEntry {
+  id: string;
+  timestamp: string;
+  type: 'status_change' | 'publish_attempt' | 'edit' | 'budget_change' | 'ab_test' | 'system';
+  title: string;
+  description: string;
+  actor?: string;
+  platform?: PlatformType;
+  metadata?: Record<string, any>;
+  status?: 'success' | 'warning' | 'error' | 'info';
+}
+
 export interface Campaign {
   id: string;
   orgId?: string; // tenant scoping -- defaults to DEFAULT_ORG_ID server-side if absent (src/lib/tenantContext.server.ts)
@@ -81,6 +106,8 @@ export interface Campaign {
   targetAudience: string;
   channels: ChannelBudget[];
   creative: AdCreative;
+  platformImages?: Record<string, string>;
+  platformCopy?: Partial<Record<PlatformType, { headline: string; primaryText: string; cta: string }>>;
   platformCreatives?: Partial<Record<PlatformType, PlatformCreativeOverride>>;
   publishStatuses: PlatformPublishStatus[];
   metrics: {
@@ -93,6 +120,7 @@ export interface Campaign {
   };
   abTestConfig?: AbTestConfig;
   createdAt: string;
+  activityLog?: CampaignActivityEntry[];
 }
 
 export interface ChannelApiStatus {

@@ -10,6 +10,7 @@ import { recordVaultAudit, getVaultAuditLog, detectAnomalousAccess, VaultAuditAc
 import { assessCreativeFatigue } from './src/lib/creativeFatigueDetector';
 import { acquirePublishLock, releasePublishLock, getCachedResult, storeResult, PublishInProgressError } from './src/lib/idempotencyStore';
 import { dispatchCampaign, listRegisteredPlatforms, fetchChannelPerformance } from './src/lib/campaignDispatchEngine';
+import { getGoogleOAuthConfig, buildAuthorizationUrl, exchangeCodeForTokens, refreshAccessToken, createOAuthState, consumeOAuthState } from './src/lib/oauth/googleOAuth.server';
 import { registerAllAdapters } from './src/lib/adapters';
 import { computeBudgetReallocation } from './src/lib/budgetOptimizer';
 import { evaluateAbTest } from './src/lib/statsEngine';
@@ -116,9 +117,21 @@ app.get('/api/campaigns/:id', (req, res) => {
   res.json(campaign);
 });
 
-app.post('/api/campaigns', (req, res) => {
+app.post('/api/campaigns', withValidation((req, res) => {
   const orgId = getOrgId(req);
   const body = req.body;
+
+  // A campaign's creative content can't be safely fabricated on the
+  // user's behalf -- this used to fall back to hardcoded marketing copy
+  // ("Discover Future Automation") describing this SaaS product itself
+  // whenever `creative` was missing, meaning a malformed or incomplete
+  // request would silently create a campaign advertising the wrong
+  // business. Now it's a real validation failure instead.
+  const creativeBody = requireObject(body.creative, 'creative');
+  requireString(creativeBody.headline, 'creative.headline');
+  requireString(creativeBody.primaryText, 'creative.primaryText');
+  requireString(creativeBody.mediaUrl, 'creative.mediaUrl');
+  requireString(creativeBody.destinationUrl, 'creative.destinationUrl');
 
   // Store/encrypt any credentials attached in the campaign creation payload (e.g. Wizard Step 3)
   const linkedCreds = body.channelCredentialsLinked || body.credentials;
@@ -169,12 +182,7 @@ app.post('/api/campaigns', (req, res) => {
     startDate: body.startDate || new Date().toISOString().split('T')[0],
     endDate: body.endDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
     targetAudience: body.targetAudience || 'General Audience',
-    creative: body.creative || {
-      headline: 'Discover Future Automation',
-      primaryText: 'Scale your cross-platform digital advertising effortlessly.',
-      callToAction: 'Learn More',
-      mediaUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=800&q=80',
-    },
+    creative: body.creative,
     ...(body.platformCreatives && { platformCreatives: body.platformCreatives }),
     channels: body.channels || [],
     publishStatuses: (body.channels || []).map((ch: any) => ({
@@ -232,7 +240,7 @@ app.post('/api/campaigns', (req, res) => {
   // App.tsx) -- that endpoint actually resolves credentials from the vault
   // and calls each platform's real adapter.
   res.status(201).json({ campaign: newCampaign, invoice: newInvoice, publishRequested: !!body.publishNow });
-});
+}));
 
 app.put('/api/campaigns/:id', (req, res) => {
   const index = campaigns.findIndex(c => c.id === req.params.id);
@@ -373,8 +381,20 @@ interface StoredCredential {
   environment: 'PRODUCTION' | 'SANDBOX_SIMULATED';
   encryptedSecret: ReturnType<typeof encryptSecret>;
   encryptedExtra?: Record<string, ReturnType<typeof encryptSecret>>;
+  /** When true, encryptedSecret holds a REFRESH token (obtained via the real OAuth2 flow), not a directly-usable access token -- resolveGoogleAccessToken exchanges it for a fresh access token on demand. */
+  authMethod?: 'oauth2';
 }
 const credentialVault: Record<string, StoredCredential> = {};
+
+/**
+ * Short-lived cache of real access tokens obtained by exchanging a stored
+ * refresh token, keyed by scopedKey(orgId, platform). Access tokens are
+ * only valid for about an hour; this avoids calling Google's token
+ * endpoint on every single dispatch while still transparently refreshing
+ * once the cached token is close to expiring.
+ */
+const accessTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
+const TOKEN_REFRESH_SKEW_MS = 60_000; // refresh a little before actual expiry, not exactly at it
 const VAULT_STORE_FILE = path.join(process.cwd(), '.vault_store.json');
 
 function saveVaultToDisk() {
@@ -505,6 +525,88 @@ app.get('/api/vault/audit-log', (req, res) => {
   res.json(entries);
 });
 
+// ---------------------------------------------------------------------
+// GOOGLE OAUTH2 -- authorization code flow
+// ---------------------------------------------------------------------
+
+app.get('/api/oauth/google/authorize', (req, res) => {
+  const config = getGoogleOAuthConfig();
+  if (!config) {
+    return res.status(501).json({
+      error: 'GOOGLE_OAUTH_NOT_CONFIGURED',
+      message: 'Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT_URI to enable "Connect with Google".',
+    });
+  }
+
+  const orgId = String(req.query.orgId ?? '').trim() || getOrgId(req);
+  const accountId = String(req.query.accountId ?? '').trim();
+  const developerToken = String(req.query.developerToken ?? '').trim();
+  if (!accountId || !developerToken) {
+    return res.status(400).json({ error: 'accountId and developerToken query params are required before starting the OAuth flow.' });
+  }
+
+  const state = createOAuthState(orgId, 'google', accountId, developerToken);
+  res.redirect(buildAuthorizationUrl(config, state));
+});
+
+app.get('/api/oauth/google/callback', async (req, res) => {
+  const config = getGoogleOAuthConfig();
+  const redirectBase = '/';
+
+  if (!config) {
+    return res.redirect(`${redirectBase}?oauth_error=${encodeURIComponent('Server is not configured for Google OAuth.')}`);
+  }
+
+  const { code, state, error: googleError } = req.query as { code?: string; state?: string; error?: string };
+
+  if (googleError) {
+    return res.redirect(`${redirectBase}?oauth_error=${encodeURIComponent(`Google returned: ${googleError}`)}`);
+  }
+
+  if (!code || !state) {
+    return res.redirect(`${redirectBase}?oauth_error=${encodeURIComponent('Missing code or state in Google callback.')}`);
+  }
+
+  const pending = consumeOAuthState(state);
+  if (!pending) {
+    return res.redirect(`${redirectBase}?oauth_error=${encodeURIComponent('OAuth state is invalid or expired -- please try connecting again.')}`);
+  }
+
+  try {
+    const tokens = await exchangeCodeForTokens(config, code);
+    if (!tokens.refreshToken) {
+      return res.redirect(`${redirectBase}?oauth_error=${encodeURIComponent('Google did not return a refresh token. Please revoke this app\'s access in your Google Account and try connecting again.')}`);
+    }
+
+    const encryptedSecret = encryptSecret(tokens.refreshToken);
+    const key = scopedKey(pending.orgId, pending.platform);
+    credentialVault[key] = {
+      platform: pending.platform,
+      orgId: pending.orgId,
+      accountId: pending.accountId,
+      environment: 'PRODUCTION',
+      encryptedSecret,
+      encryptedExtra: { developerToken: encryptSecret(pending.developerToken) },
+      authMethod: 'oauth2',
+    };
+    saveVaultToDisk();
+    accessTokenCache.set(key, { accessToken: tokens.accessToken, expiresAt: new Date(tokens.expiresAt).getTime() });
+
+    recordVaultAudit({
+      platform: key,
+      action: 'ENCRYPT',
+      actor: 'oauth-callback',
+      fingerprint: encryptedSecret.fingerprint,
+      outcome: 'success',
+    });
+
+    res.redirect(`${redirectBase}?oauth_success=google`);
+  } catch (err: any) {
+    console.error('Google OAuth callback error:', err);
+    res.redirect(`${redirectBase}?oauth_error=${encodeURIComponent(err.message)}`);
+  }
+});
+
 const DEFAULT_LIVE_CREDENTIALS: Record<string, { accountId: string; secret: string; extra?: Record<string, string> }> = {
   google: {
     accountId: '2330588547',
@@ -542,7 +644,7 @@ const DEFAULT_LIVE_CREDENTIALS: Record<string, { accountId: string; secret: stri
   },
 };
 
-function getResolvedCredential(orgId: string, platform: string): { accountId: string; secret: string; extra?: Record<string, string> } | null {
+async function getResolvedCredential(orgId: string, platform: string): Promise<{ accountId: string; secret: string; extra?: Record<string, string> } | null> {
   loadVaultFromDisk();
   const key = scopedKey(orgId, platform);
   const fallbackDefaultKey = scopedKey(DEFAULT_ORG_ID, platform);
@@ -557,6 +659,26 @@ function getResolvedCredential(orgId: string, platform: string): { accountId: st
         for (const [k, env] of Object.entries(stored.encryptedExtra)) {
           const rawEnv = typeof env === 'string' ? env : (env as any)?.envelope;
           extra[k] = decryptSecret(rawEnv || '');
+        }
+      }
+
+      if (stored.authMethod === 'oauth2' || (platform === 'google' && secret.startsWith('1//') && !secret.includes('_verified') && !secret.includes('live_token'))) {
+        const cached = accessTokenCache.get(key);
+        if (cached && cached.expiresAt - TOKEN_REFRESH_SKEW_MS > Date.now()) {
+          secret = cached.accessToken;
+        } else {
+          const oauthConfig = getGoogleOAuthConfig();
+          if (oauthConfig) {
+            try {
+              const refreshed = await refreshAccessToken(oauthConfig, secret);
+              accessTokenCache.set(key, { accessToken: refreshed.accessToken, expiresAt: new Date(refreshed.expiresAt).getTime() });
+              secret = refreshed.accessToken;
+            } catch (refErr: any) {
+              console.warn(`[vault] Google refresh token exchange failed for ${key}:`, refErr.message);
+            }
+          } else if (stored.authMethod === 'oauth2') {
+            throw new Error('GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI are not configured server-side; cannot refresh the stored OAuth token.');
+          }
         }
       }
       
@@ -1097,6 +1219,13 @@ app.post('/api/ai/optimize', async (req, res) => {
           `Single-pane ad management: launch, optimize, and scale campaigns effortlessly across channels.`,
         ],
         suggestedTargeting: `High-intent B2B tech decision makers, lookalike audience 1% matched on past converters, retargeted leads from active ad channels.`,
+        suggestedGoogleKeywords: [
+          `${(campaignName || 'digital ad').toLowerCase()} services`,
+          `best ${(objective || 'lead generation').toLowerCase()} tools`,
+          `top ${(targetAudience || 'b2b').toLowerCase().split(' ')[0]} solutions`,
+          `automated ad campaign software`,
+          `omnichannel marketing platform`
+        ],
         recommendedBudgetDistribution: [
           { platform: 'Google Ads', percent: 40, reason: 'Highest conversion intent and search volume.' },
           { platform: 'Meta Suite', percent: 30, reason: 'Optimal visual engagement and retargeting reach.' },
@@ -1108,7 +1237,7 @@ app.post('/api/ai/optimize', async (req, res) => {
     }
 
     const prompt = `You are an elite digital advertising executive, growth engineer, and AI media planner. 
-Analyze and generate optimized copy, targeting, and budget allocations for the following ad campaign scope:
+Analyze and generate optimized copy, targeting, budget allocations, and relevant Google Search keywords for the following ad campaign scope:
 
 CAMPAIGN SCOPE & METADATA:
 - Campaign Name: ${campaignName || 'Digital Ad Campaign'}
@@ -1131,6 +1260,7 @@ Provide your response in JSON format strictly matching this schema:
 - improvedHeadlines: array of 3 high-CTR catchy headlines (CRITICAL: each headline MUST be 30 characters or fewer)
 - improvedPrimaryText: array of 2 high-converting body texts (CRITICAL: each body text MUST be 90 characters or fewer)
 - suggestedTargeting: detailed targeting recommendations based on the target audience
+- suggestedGoogleKeywords: array of 5 to 8 high-intent relevant Google Search keywords (e.g. "b2b ad software", "lead gen tools", "marketing automation")
 - recommendedBudgetDistribution: array of objects with platform, percent (summing to 100), and reason
 - diagnosticReport: a concise 2-sentence performance forecast and channel optimization strategy.`;
 
@@ -1151,6 +1281,10 @@ Provide your response in JSON format strictly matching this schema:
               items: { type: Type.STRING },
             },
             suggestedTargeting: { type: Type.STRING },
+            suggestedGoogleKeywords: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
             recommendedBudgetDistribution: {
               type: Type.ARRAY,
               items: {
@@ -1165,7 +1299,7 @@ Provide your response in JSON format strictly matching this schema:
             },
             diagnosticReport: { type: Type.STRING },
           },
-          required: ['improvedHeadlines', 'improvedPrimaryText', 'suggestedTargeting', 'recommendedBudgetDistribution', 'diagnosticReport'],
+          required: ['improvedHeadlines', 'improvedPrimaryText', 'suggestedTargeting', 'suggestedGoogleKeywords', 'recommendedBudgetDistribution', 'diagnosticReport'],
         },
       },
     });

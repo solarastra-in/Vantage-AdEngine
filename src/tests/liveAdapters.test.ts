@@ -8,6 +8,7 @@ const validPayload: PlatformPayload = {
   headline: 'Test Headline',
   primaryText: 'Test body text',
   mediaUrl: 'https://example.com/img.jpg',
+  destinationUrl: 'https://example.com',
   callToAction: 'Learn More',
   budget: 1000,
   targeting: 'x',
@@ -101,6 +102,30 @@ describe('live adapters: real call construction when credential IS present (fetc
     const urls = fetchMock.mock.calls.map(c => String(c[0]));
     expect(urls.some(u => u.includes('customers/5144015092/'))).toBe(true);
     expect(urls.every(u => !u.includes('514-401-5092'))).toBe(true);
+  });
+
+  test('google adapter rejects an authorization code (starts with "4/") with a clear, actionable error instead of sending it to Google as a Bearer token', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch');
+    await expect(
+      googleAdapter.publish(validPayload, {
+        accountId: '2330588547',
+        secret: '4/0AXEQxIA40eHgtopkCNsVWC_hLKxqVqZNL23qUbX6VRmNylNUTWhap4dDBfiFNys62z08yA',
+        extra: { developerToken: 'Xzaqp9GgfobUz1suCzdtPg' },
+      })
+    ).rejects.toThrow(/authorization CODE/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('google adapter rejects a raw refresh token (starts with "1//") with a clear, actionable error', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch');
+    await expect(
+      googleAdapter.publish(validPayload, {
+        accountId: '2330588547',
+        secret: '1//0gAbCdEfGhIjKlMnOpQrStUvWxYz',
+        extra: { developerToken: 'dev_tok' },
+      })
+    ).rejects.toThrow(/REFRESH token/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test('google adapter rejects an account ID that normalizes to nothing (no digits at all)', async () => {

@@ -15,7 +15,7 @@ function makeCampaign(publishStatuses: Campaign['publishStatuses']): Campaign {
     endDate: '',
     targetAudience: 'x',
     channels: [],
-    creative: { headline: 'h', primaryText: 'p', callToAction: 'Learn More', mediaUrl: 'x' },
+    creative: { headline: 'h', primaryText: 'p', callToAction: 'Learn More', mediaUrl: 'x', destinationUrl: 'https://example.com' },
     publishStatuses,
     metrics: { impressions: 0, clicks: 0, conversions: 0, ctr: 0, cpc: 0, roas: 0 },
     createdAt: new Date().toISOString(),

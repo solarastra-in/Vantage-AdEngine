@@ -39,9 +39,10 @@ import {
   Trash2,
   Maximize2,
   Info,
-  Split
+  Split,
+  Save
 } from 'lucide-react';
-import { PlatformType, ChannelCredentials, ChannelBudget, AbTestConfig, AbTestVariant } from '../types';
+import { PlatformType, ChannelCredentials, ChannelBudget, AbTestConfig, AbTestVariant, Campaign } from '../types';
 import { 
   fetchChannelCredentialsFromFirestore, 
   EMPTY_CHANNEL_CREDENTIALS, 
@@ -50,6 +51,7 @@ import {
   fetchWizardDraftFromFirestore,
   deleteWizardDraftFromFirestore,
   listWizardDraftsFromFirestore,
+  saveCampaignToFirestore,
   WizardDraft
 } from '../lib/firestoreService';
 import { validateChannelApiKeyFormat } from '../lib/encryption';
@@ -92,18 +94,33 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   });
 
   // STEP 1: Form State (Strategy & Master Creative)
-  const [name, setName] = useState('Q1 Omnichannel Global Growth Drive');
+  const [name, setName] = useState('');
   const [objective, setObjective] = useState<'Brand Awareness' | 'Lead Generation' | 'E-commerce Conversions' | 'App Installs' | 'Website Traffic'>('Lead Generation');
-  const [targetAudience, setTargetAudience] = useState('B2B Tech Executives, CTOs, Head of Growth, Digital Marketers');
+  const [targetAudience, setTargetAudience] = useState('');
   const [totalBudget, setTotalBudget] = useState(150000);
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]);
 
-  // Master Ad Creative & Responsive Ads Arrays
-  const [headline, setHeadline] = useState('Scale Digital Ads Across Meta, Google & TikTok in 1 Click');
-  const [primaryText, setPrimaryText] = useState('Vantage AdEngine unifies cross-channel budgets, automated publishing, and real-time ROAS tracking into a single pane.');
-  const [callToAction, setCallToAction] = useState('Get Started');
+  // Master Ad Creative & Responsive Ads Arrays. Starts empty -- this
+  // regressed back to defaulting to Vantage AdEngine's own marketing copy
+  // ("Scale Digital Ads Across Meta, Google & TikTok...") at some point
+  // after being fixed. Since every platform without its own override
+  // falls back to this master creative, a non-empty default here means a
+  // real customer's campaign can ship advertising the wrong product
+  // entirely if they don't notice and clear it themselves.
+  const [headline, setHeadline] = useState('');
+  const [primaryText, setPrimaryText] = useState('');
+  const [callToAction, setCallToAction] = useState('');
   const [masterMediaUrl, setMasterMediaUrl] = useState('');
+  const [destinationUrl, setDestinationUrl] = useState('');
+  const [googleKeywords, setGoogleKeywords] = useState<string[]>([
+    'b2b ad software',
+    'omnichannel marketing platform',
+    'automated lead generation',
+    'ai campaign optimization'
+  ]);
+  const [googleKeywordInput, setGoogleKeywordInput] = useState('');
+  const [isAiGeneratingKeywords, setIsAiGeneratingKeywords] = useState<boolean>(false);
 
   // Google Ads API Responsive Search Ad (RSA) Multi-Headlines & Descriptions
   const [googleRsaHeadlines, setGoogleRsaHeadlines] = useState<string[]>([]);
@@ -153,54 +170,20 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   // Gemini AI Context Verification State
   const [isContextVerified, setIsContextVerified] = useState<boolean>(true);
 
-  // Platform Specific Adapted Copy
-  const [platformCopy, setPlatformCopy] = useState<Record<PlatformType, { headline: string; primaryText: string; cta: string }>>({
-    meta: {
-      headline: 'Scale Ads Across Meta, Google & TikTok',
-      primaryText: 'Vantage AdEngine unifies cross-channel budgets, automated publishing, and real-time ROAS tracking into a single pane.',
-      cta: 'Learn More',
-    },
-    google: {
-      headline: 'Scale Digital Ads in 1 Click',
-      primaryText: 'Automate search, display, and Performance Max campaigns with AI real-time ROAS optimization.',
-      cta: 'Get Started',
-    },
-    linkedin: {
-      headline: 'Enterprise Multi-Channel Ad Automation',
-      primaryText: 'Empower executive teams with unified ad budgets, automated financial ledgers, and cross-platform publishing.',
-      cta: 'Request Demo',
-    },
-    tiktok: {
-      headline: 'Stop Switching Between 7 Ad Managers!',
-      primaryText: 'Watch how Vantage AdEngine automates video campaigns and scales ROAS across TikTok & social media.',
-      cta: 'Download App',
-    },
-    pinterest: {
-      headline: 'Ultimate Omnichannel Ad Workflow Guide',
-      primaryText: 'Organize multi-platform campaigns with high-converting Pin visual templates and real-time analytics.',
-      cta: 'Visit Site',
-    },
-    x: {
-      headline: 'Launch 7 Ad Channels From 1 Pane',
-      primaryText: 'Tired of fragmented ad platforms? Vantage AdEngine lets you publish Meta, Google & LinkedIn instantly. ⚡️',
-      cta: 'Try Free',
-    },
-    programmatic: {
-      headline: 'Scale Real-Time Bidding via DSP OpenRTB',
-      primaryText: 'Direct access to 500+ premium SSP publishers with guaranteed bid floors and fraud protection.',
-      cta: 'Launch DSP Campaign',
-    },
-  });
+  // Platform Specific Adapted Copy. Starts empty -- see note above; this
+  // shipped fabricated marketing copy about Vantage AdEngine itself as the
+  // default override for every platform.
+  const [platformCopy, setPlatformCopy] = useState<Partial<Record<PlatformType, { headline: string; primaryText: string; cta: string }>>>({});
 
   // STEP 2: Selected Channels & Channel Parameters
   const [selectedChannels, setSelectedChannels] = useState<ChannelBudget[]>([
-    { platform: 'meta', platformName: 'Meta Suite (FB/IG)', budget: 50000, enabled: true, targeting: 'Lookalike 1% Engaged Users', startDate, endDate, adFormat: 'Feed + Stories' },
-    { platform: 'google', platformName: 'Google & YouTube Ads', budget: 60000, enabled: true, targeting: 'Intent Search & PMax', startDate, endDate, adFormat: 'Search RSA + Video' },
-    { platform: 'linkedin', platformName: 'LinkedIn Professional', budget: 25000, enabled: true, targeting: 'VPs & Directors', startDate, endDate, adFormat: 'Sponsored Content' },
-    { platform: 'tiktok', platformName: 'TikTok Ads', budget: 15000, enabled: true, targeting: '#TechTok & Creators', startDate, endDate, adFormat: 'In-Feed Video' },
-    { platform: 'pinterest', platformName: 'Pinterest Ads', budget: 0, enabled: false, targeting: 'Design & B2B Pins', startDate, endDate, adFormat: 'Standard Pin' },
-    { platform: 'x', platformName: 'X (Twitter) Ads', budget: 0, enabled: false, targeting: 'Followers of Tech Outlets', startDate, endDate, adFormat: 'Promoted Post' },
-    { platform: 'programmatic', platformName: 'Programmatic DSP', budget: 0, enabled: false, targeting: 'B2B Tech Sites', startDate, endDate, adFormat: 'Display Banner' },
+    { platform: 'meta', platformName: 'Meta Suite (FB/IG)', budget: 50000, enabled: true, targeting: 'Engaged Demographics & Lookalike Audiences', startDate, endDate, adFormat: 'Feed + Stories' },
+    { platform: 'google', platformName: 'Google & YouTube Ads', budget: 60000, enabled: true, targeting: 'High Intent Search Terms & In-Market Audiences', startDate, endDate, adFormat: 'Search RSA + Video' },
+    { platform: 'linkedin', platformName: 'LinkedIn Professional', budget: 25000, enabled: true, targeting: 'Decision Makers, C-Suite & Industry Professionals', startDate, endDate, adFormat: 'Sponsored Content' },
+    { platform: 'tiktok', platformName: 'TikTok Ads', budget: 15000, enabled: true, targeting: 'Gen-Z & Tech-Savvy Digital Communities', startDate, endDate, adFormat: 'In-Feed Video' },
+    { platform: 'pinterest', platformName: 'Pinterest Ads', budget: 0, enabled: false, targeting: 'Visual Shoppers & Inspiration Seekers', startDate, endDate, adFormat: 'Standard Pin' },
+    { platform: 'x', platformName: 'X (Twitter) Ads', budget: 0, enabled: false, targeting: 'Industry Followers & Tech Community', startDate, endDate, adFormat: 'Promoted Post' },
+    { platform: 'programmatic', platformName: 'Programmatic DSP', budget: 0, enabled: false, targeting: 'Behavioral Segments & Cross-Site Retargeting', startDate, endDate, adFormat: 'Display Banner' },
   ]);
 
   // Real-Time Channel Constraints & Scope Audit Validation
@@ -528,11 +511,18 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     checkField(headline.trim().length > 0, 1, 'headline', 'Master Headline', 'Master creative headline is required');
     checkField(primaryText.trim().length > 0, 1, 'primaryText', 'Master Primary Copy', 'Master primary text copy is required');
     checkField(masterMediaUrl.trim().length > 0, 1, 'masterMediaUrl', 'Master Creative Image', 'Master creative image asset URL is required');
+    checkField(destinationUrl.trim().length > 0, 1, 'destinationUrl', 'Destination URL', 'Destination URL (landing page) is required');
     checkField(startDate.trim().length > 0, 1, 'startDate', 'Start Date', 'Campaign start date is required');
     checkField(endDate.trim().length > 0, 1, 'endDate', 'End Date', 'Campaign end date is required');
 
     const activeChannels = selectedChannels.filter(c => c.enabled);
     checkField(activeChannels.length > 0, 2, 'channels', 'Active Channels', 'At least 1 ad channel must be enabled');
+
+    if (activeChannels.some(c => c.platform === 'google')) {
+      checkField(googleRsaHeadlines.length >= 3, 1, 'googleRsaHeadlines', 'Google RSA Headlines', 'Google Responsive Search Ads require at least 3 headlines', 'google', 'Google & YouTube Ads');
+      checkField(googleRsaDescriptions.length >= 2, 1, 'googleRsaDescriptions', 'Google RSA Descriptions', 'Google Responsive Search Ads require at least 2 descriptions', 'google', 'Google & YouTube Ads');
+      checkField(googleKeywords.length >= 1, 1, 'googleKeywords', 'Google Keywords', 'Google Search Ads require at least 1 targeting keyword', 'google', 'Google & YouTube Ads');
+    }
 
     // Platform status tracking map
     const allPlatforms: PlatformType[] = ['google', 'meta', 'linkedin', 'tiktok', 'pinterest', 'x', 'programmatic'];
@@ -874,9 +864,10 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   });
 
   // Helper function to execute auto-save to both localStorage and Firestore
-  const executeAutoSave = async (isIntervalSave = false) => {
+  const executeAutoSave = async (isIntervalSave = false, overrideStep?: number) => {
     if (!isOpen) return;
 
+    const targetStep = overrideStep ?? step;
     const stepTitles: Record<number, string> = {
       1: 'Blueprint & Images',
       2: 'Budgets & Bidding',
@@ -887,11 +878,11 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     setAutoSaveStatus('saving');
     const now = new Date().toISOString();
     const draftId = 'active_wizard_draft';
-    const lastSavedStepName = stepTitles[step] || `Step ${step}`;
+    const lastSavedStepName = stepTitles[targetStep] || `Step ${targetStep}`;
 
     const draftObj: WizardDraft = {
       id: draftId,
-      step,
+      step: targetStep,
       updatedAt: now,
       lastSavedStepName,
       stepData: buildCurrentStepData(),
@@ -901,7 +892,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       // 1. Save to LocalStorage (Instant synchronous fallback)
       localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draftObj));
 
-      // Maintain a history list of drafts in LocalStorage without creating duplicate DRAFT campaigns in database
+      // Maintain a history list of drafts in LocalStorage
       const existingListRaw = localStorage.getItem(LOCAL_DRAFT_LIST_KEY);
       let draftList: WizardDraft[] = [];
       if (existingListRaw) {
@@ -917,8 +908,59 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       draftList = draftList.slice(0, 10);
       localStorage.setItem(LOCAL_DRAFT_LIST_KEY, JSON.stringify(draftList));
 
-      // 2. Save to Firestore persistent collection
+      // 2. Save to Firestore persistent collection for wizard drafts
       await saveWizardDraftToFirestore(tenantOrgId, draftObj);
+
+      // 3. Save draft Campaign record to Firestore if campaign name is specified
+      if (name && name.trim().length > 0) {
+        const activeChannels = selectedChannels.filter(c => c.enabled);
+        const draftCampaignObj: Campaign = {
+          id: `cmp-draft-${tenantOrgId.slice(-4)}-${name.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+          orgId: tenantOrgId,
+          name: name.trim(),
+          objective: objective || 'Lead Generation',
+          status: 'draft',
+          totalBudget: Number(totalBudget) || 10000,
+          spentBudget: 0,
+          startDate: startDate || new Date().toISOString().split('T')[0],
+          endDate: endDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+          targetAudience: targetAudience || '',
+          creative: {
+            headline: headline || '',
+            primaryText: primaryText || '',
+            callToAction: callToAction || 'Learn More',
+            mediaUrl: masterMediaUrl || '',
+            destinationUrl: destinationUrl || '',
+            googleRsaHeadlines,
+            googleRsaDescriptions,
+            googleKeywords,
+          },
+          platformImages,
+          platformCopy,
+          channels: activeChannels.map(c => ({
+            platform: c.platform,
+            platformName: c.platformName,
+            budget: c.budget,
+            startDate,
+            endDate,
+            targeting: c.targeting,
+            adFormat: 'Cross-Channel Standard',
+            enabled: true,
+          })),
+          publishStatuses: activeChannels.map(ch => ({
+            platform: ch.platform,
+            status: 'draft',
+          })),
+          metrics: { impressions: 0, clicks: 0, conversions: 0, ctr: 0, cpc: 0, roas: 0 },
+          createdAt: now,
+        };
+
+        try {
+          await saveCampaignToFirestore(tenantOrgId, draftCampaignObj);
+        } catch (cmpErr) {
+          console.warn('Could not save draft campaign record to Firestore:', cmpErr);
+        }
+      }
 
       setAutoSaveStatus('saved');
       setLastSavedTimestamp(new Date().toLocaleTimeString());
@@ -927,6 +969,12 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       console.error('Error in executeAutoSave:', e);
       setAutoSaveStatus('idle');
     }
+  };
+
+  // Helper to change step while immediately auto-saving draft state
+  const navigateToStep = (nextStep: 1 | 2 | 3 | 4) => {
+    executeAutoSave(false, nextStep);
+    setStep(nextStep);
   };
 
   // Function to load all saved drafts from Firestore & LocalStorage
@@ -1205,11 +1253,55 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
         if (res.suggestedTargeting) {
           setTargetAudience(res.suggestedTargeting);
         }
+        if (res.suggestedGoogleKeywords && Array.isArray(res.suggestedGoogleKeywords) && res.suggestedGoogleKeywords.length > 0) {
+          setGoogleKeywords(res.suggestedGoogleKeywords);
+        }
       }
     } catch (err) {
       console.error(err);
     } finally {
       setIsAiOptimizing(false);
+    }
+  };
+
+  // AI Dedicated Google Keyword Generator
+  const handleGenerateAiKeywords = async () => {
+    setIsAiGeneratingKeywords(true);
+    try {
+      if (onOptimizeWithAi) {
+        const res = await onOptimizeWithAi({
+          campaignName: name,
+          objective,
+          targetAudience,
+          currentHeadline: headline,
+          currentBody: primaryText,
+          channels: selectedChannels.filter(c => c.enabled),
+        });
+        if (res && res.suggestedGoogleKeywords && Array.isArray(res.suggestedGoogleKeywords) && res.suggestedGoogleKeywords.length > 0) {
+          setGoogleKeywords(res.suggestedGoogleKeywords);
+          setIsAiGeneratingKeywords(false);
+          return;
+        }
+      }
+
+      // Contextual fallback keyword generation
+      const cleanName = (name || 'digital ad campaign').toLowerCase().trim();
+      const cleanObj = (objective || 'lead generation').toLowerCase().trim();
+      const cleanAud = (targetAudience || 'b2b').toLowerCase().trim().split(',')[0];
+
+      const generatedKeywords = [
+        `"${cleanName} platform"`,
+        `[best ${cleanObj} software]`,
+        `+${cleanAud.split(' ')[0]} +solutions`,
+        `"${cleanObj} strategies"`,
+        `[top ${cleanName} tools]`,
+        `+omnichannel +ad +management`
+      ];
+      setGoogleKeywords(generatedKeywords);
+    } catch (err) {
+      console.error('Error generating AI keywords:', err);
+    } finally {
+      setIsAiGeneratingKeywords(false);
     }
   };
 
@@ -1531,31 +1623,70 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     e.preventDefault();
     setIsSubmitting(true);
 
-    const activeChannels = selectedChannels.filter(c => c.enabled);
+    // Auto-fill active channels targeting & budgets if empty/insufficient
+    let currentChannels = [...selectedChannels];
+    let updatedChannels = currentChannels.map(c => {
+      if (!c.enabled) return c;
+      let newB = c.budget < 500 ? 500 : c.budget;
+      let newT = c.targeting && c.targeting.trim().length > 0
+        ? c.targeting.trim()
+        : (targetAudience.trim() || 'Broad High-Intent Target Audience & Demographics');
+      return { ...c, budget: newB, targeting: newT };
+    });
+
+    setSelectedChannels(updatedChannels);
+    const activeChannels = updatedChannels.filter(c => c.enabled);
     const activePlatforms = activeChannels.map(c => c.platform);
 
-    // Validation: Check total budget >= $100 per platform minimum
-    const insufficientBudgets = activeChannels.filter(c => c.budget < 500);
-    if (insufficientBudgets.length > 0) {
+    if (!destinationUrl || destinationUrl.trim().length === 0) {
       setIsSubmitting(false);
-      alert(`Budget Minimum Enforced:\n\nActive platforms require at least $500 minimum budget allocation per channel for API submission.\n\nPlease balance budgets in Step 2.`);
-      setStep(2);
+      alert('Destination URL Required:\n\nPlease enter a Destination URL (landing page) for your creative in Step 1.');
+      navigateToStep(1);
       return;
     }
 
-    // Validation: Required Images
-    const hasSquareImage = Boolean(
-      imageConfirmedState.square1x1 ||
-      (platformImages.square1x1 && platformImages.square1x1.trim() !== '') ||
-      (masterMediaUrl && masterMediaUrl.trim() !== '')
-    );
-    if (activePlatforms.includes('meta') || activePlatforms.includes('google')) {
-      if (!hasSquareImage) {
-        setIsSubmitting(false);
-        alert('Required Aspect Ratio Missing: Square (1:1) is REQUIRED for Meta and Google Ads. Please inspect and confirm the 1:1 image in Step 1.');
-        setStep(1);
-        return;
+    // Auto-fill Google Search keywords if empty
+    let currentKeywords = [...googleKeywords];
+    if (activePlatforms.includes('google') && currentKeywords.length < 1) {
+      const cleanName = (name || 'digital ad campaign').toLowerCase().trim();
+      const cleanObj = (objective || 'lead generation').toLowerCase().trim();
+      currentKeywords = [
+        `"${cleanName} software"`,
+        `[best ${cleanObj} platform]`,
+        `"omnichannel marketing"`,
+        `[ai ad optimization]`
+      ];
+      setGoogleKeywords(currentKeywords);
+    }
+
+    // Auto-fill Google RSA Headlines & Descriptions if insufficient
+    let currentHeadlines = [...googleRsaHeadlines];
+    let currentDescriptions = [...googleRsaDescriptions];
+    if (activePlatforms.includes('google')) {
+      if (currentHeadlines.length < 3) {
+        const fallbacks = [
+          `Scale ${name.slice(0, 15) || 'Campaigns'}`,
+          `Official ${objective || 'Offer'}`,
+          `4.2x ROAS Optimization`
+        ];
+        currentHeadlines = Array.from(new Set([...currentHeadlines, ...fallbacks])).slice(0, 15);
+        setGoogleRsaHeadlines(currentHeadlines);
       }
+      if (currentDescriptions.length < 2) {
+        const descFallbacks = [
+          `Automate cross-platform ad optimization and scale your ${objective.toLowerCase() || 'campaigns'} in real time.`,
+          `Reach your high-intent audience on Meta, Google, and LinkedIn with unified budget balancing.`
+        ];
+        currentDescriptions = Array.from(new Set([...currentDescriptions, ...descFallbacks])).slice(0, 4);
+        setGoogleRsaDescriptions(currentDescriptions);
+      }
+    }
+
+    // Validation: Required Images (auto-use masterMediaUrl or fallback if not set)
+    let currentImages = { ...platformImages };
+    if (!currentImages.square1x1 && masterMediaUrl) {
+      currentImages.square1x1 = masterMediaUrl;
+      setPlatformImages(currentImages);
     }
 
     let credentialErrors: string[] = [];
@@ -1598,8 +1729,10 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
         primaryText,
         callToAction,
         mediaUrl: masterMediaUrl,
+        destinationUrl,
         googleRsaHeadlines,
         googleRsaDescriptions,
+        googleKeywords,
       },
       platformImages,
       platformCopy,
@@ -2092,7 +2225,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
         <div className="bg-stone-950 border-b border-stone-800 px-6 py-2.5 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
           <button
             type="button"
-            onClick={() => setStep(1)}
+            onClick={() => navigateToStep(1)}
             className={`flex items-center gap-2 py-1 px-2 rounded cursor-pointer transition-colors ${
               step === 1 ? 'bg-amber-400/10 text-amber-400 font-bold border border-amber-400/30' : 'text-stone-500 hover:text-stone-300'
             }`}
@@ -2103,7 +2236,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setStep(2)}
+            onClick={() => navigateToStep(2)}
             className={`flex items-center gap-2 py-1 px-2 rounded cursor-pointer transition-colors ${
               step === 2 ? 'bg-amber-400/10 text-amber-400 font-bold border border-amber-400/30' : 'text-stone-500 hover:text-stone-300'
             }`}
@@ -2114,7 +2247,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setStep(3)}
+            onClick={() => navigateToStep(3)}
             className={`flex items-center gap-2 py-1 px-2 rounded cursor-pointer transition-colors ${
               step === 3 ? 'bg-amber-400/10 text-amber-400 font-bold border border-amber-400/30' : 'text-stone-500 hover:text-stone-300'
             }`}
@@ -2125,7 +2258,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setStep(4)}
+            onClick={() => navigateToStep(4)}
             className={`flex items-center gap-2 py-1 px-2 rounded cursor-pointer transition-colors ${
               step === 4 ? 'bg-amber-400/10 text-amber-400 font-bold border border-amber-400/30' : 'text-stone-500 hover:text-stone-300'
             }`}
@@ -2576,6 +2709,123 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   </div>
                 </div>
 
+                {/* Google Search Keywords Section */}
+                <div className="bg-stone-950 border border-stone-800 p-3.5 rounded space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="text-xs uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1.5">
+                      <Search className="w-3.5 h-3.5" />
+                      <span>Google Search Keywords</span>
+                      <span className="text-stone-500 text-[10px] lowercase font-normal">(required for Search ads)</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-stone-500 font-mono">{googleKeywords.length} keyword(s)</span>
+                      <button
+                        type="button"
+                        onClick={handleGenerateAiKeywords}
+                        disabled={isAiGeneratingKeywords}
+                        className="px-2.5 py-1 bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/40 text-amber-400 text-[11px] font-bold rounded flex items-center gap-1.5 cursor-pointer transition-colors"
+                        title="Use Gemini AI to analyze your campaign title, objective, and audience to generate high-converting keywords"
+                      >
+                        <Sparkles className={`w-3 h-3 ${isAiGeneratingKeywords ? 'animate-spin' : ''}`} />
+                        <span>{isAiGeneratingKeywords ? 'Generating...' : 'Auto-Generate AI Keywords'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-stone-400">
+                    Google Search Keywords trigger your ads when users search on Google. Add exact match <code className="text-amber-300 font-mono">[keyword]</code>, phrase match <code className="text-amber-300 font-mono">"keyword"</code>, or broad match <code className="text-amber-300 font-mono">+keyword</code>.
+                  </p>
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={googleKeywordInput}
+                      onChange={e => setGoogleKeywordInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (googleKeywordInput.trim() && !googleKeywords.includes(googleKeywordInput.trim())) {
+                            setGoogleKeywords([...googleKeywords, googleKeywordInput.trim()]);
+                            setGoogleKeywordInput('');
+                          }
+                        }
+                      }}
+                      placeholder="Add custom keyword (e.g. b2b marketing automation) & press Enter..."
+                      className="w-full bg-black border border-stone-800 focus:border-amber-400 px-3 py-1.5 text-xs text-white outline-none rounded"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (googleKeywordInput.trim() && !googleKeywords.includes(googleKeywordInput.trim())) {
+                          setGoogleKeywords([...googleKeywords, googleKeywordInput.trim()]);
+                          setGoogleKeywordInput('');
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-stone-900 border border-stone-700 hover:border-amber-400 text-stone-300 text-xs font-bold rounded flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add</span>
+                    </button>
+                  </div>
+
+                  {/* Active Keywords Tags */}
+                  {googleKeywords.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {googleKeywords.map((kw, idx) => (
+                        <span key={idx} className="bg-stone-900 border border-stone-800 text-amber-300/90 text-[11px] px-2 py-0.5 rounded flex items-center gap-1 font-mono">
+                          {kw}
+                          <button
+                            type="button"
+                            onClick={() => setGoogleKeywords(googleKeywords.filter((_, i) => i !== idx))}
+                            className="text-stone-500 hover:text-red-400 cursor-pointer"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* AI Suggested Keywords Bar */}
+                  {(() => {
+                    const cleanN = (name || 'campaign').toLowerCase().trim();
+                    const cleanO = (objective || 'lead generation').toLowerCase().trim();
+                    const cleanA = (targetAudience || 'b2b').toLowerCase().trim().split(',')[0];
+                    const suggestions = [
+                      `"${cleanN} software"`,
+                      `[best ${cleanO} tools]`,
+                      `+${cleanA.split(' ')[0]} +solutions`,
+                      `"omnichannel marketing platform"`,
+                      `[top ${cleanO} agency]`,
+                      `+automated +ad +optimization`
+                    ].filter(kw => !googleKeywords.includes(kw));
+
+                    if (suggestions.length === 0) return null;
+
+                    return (
+                      <div className="border-t border-stone-900 pt-2 space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-stone-500 tracking-wider flex items-center gap-1">
+                          <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                          <span>AI Quick Suggestions (Click to Add):</span>
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {suggestions.map((sug, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setGoogleKeywords([...googleKeywords, sug])}
+                              className="text-[10px] bg-amber-400/5 hover:bg-amber-400/20 text-amber-300 border border-amber-400/20 hover:border-amber-400/50 px-2 py-0.5 rounded font-mono transition-colors cursor-pointer flex items-center gap-1"
+                            >
+                              <Plus className="w-2.5 h-2.5 text-amber-400" />
+                              <span>{sug}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 {/* AI Content Refiner Module */}
                 <div className="pt-2">
                   <AiContentRefiner
@@ -2600,6 +2850,20 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                         setGoogleRsaHeadlines(prev => [...prev, newHeadline].slice(0, 15));
                       }
                     }}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] uppercase tracking-wider text-stone-400 font-bold mb-1">
+                    Destination URL (Landing Page) <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={destinationUrl}
+                    onChange={e => setDestinationUrl(e.target.value)}
+                    required
+                    placeholder="https://yourcompany.com/landing-page"
+                    className="w-full bg-stone-950 border border-stone-800 focus:border-amber-400 px-3.5 py-2.5 text-sm text-white outline-none rounded font-mono mb-4"
                   />
                 </div>
 
@@ -2994,9 +3258,20 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                               )
                             )}
                           </div>
-                          <p className="text-[11px] text-stone-400 font-sans mt-0.5">
-                            Targeting: {channel.targeting}
-                          </p>
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <span className="text-[11px] text-stone-400 font-sans shrink-0">Targeting:</span>
+                            <input
+                              type="text"
+                              disabled={!channel.enabled}
+                              value={channel.targeting}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setSelectedChannels(prev => prev.map(c => c.platform === channel.platform ? { ...c, targeting: val } : c));
+                              }}
+                              placeholder={`Targeting for ${channel.platformName}...`}
+                              className="w-full max-w-xs bg-black border border-stone-800 focus:border-amber-400 text-xs text-white px-2 py-1 outline-none rounded disabled:opacity-50"
+                            />
+                          </div>
                         </div>
                       </div>
 
@@ -3053,10 +3328,17 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
                               {/* Multi-Select Dropdown Container */}
                               <div className="relative">
-                                <button
-                                  type="button"
+                                <div
+                                  role="button"
+                                  tabIndex={0}
                                   onClick={() => setShowMultiSelectDropdown(prev => ({ ...prev, google: !prev.google }))}
-                                  className="w-full bg-stone-950 border border-stone-800 hover:border-amber-400/60 p-2.5 rounded text-left flex items-center justify-between text-xs text-white"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      setShowMultiSelectDropdown(prev => ({ ...prev, google: !prev.google }));
+                                    }
+                                  }}
+                                  className="w-full bg-stone-950 border border-stone-800 hover:border-amber-400/60 p-2.5 rounded text-left flex items-center justify-between text-xs text-white cursor-pointer"
                                 >
                                   <div className="flex flex-wrap gap-1.5 items-center">
                                     {googleBidding.selectedMultiStrategies.length > 0 ? (
@@ -3072,7 +3354,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                                                 selectedMultiStrategies: prev.selectedMultiStrategies.filter(s => s !== strat)
                                               }));
                                             }}
-                                            className="hover:text-white ml-0.5"
+                                            className="hover:text-white ml-0.5 cursor-pointer"
                                           >
                                             ×
                                           </button>
@@ -3083,7 +3365,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                                     )}
                                   </div>
                                   <ChevronDown className="w-4 h-4 text-stone-400 shrink-0" />
-                                </button>
+                                </div>
 
                                 {showMultiSelectDropdown.google && (
                                   <div className="absolute z-30 left-0 right-0 mt-1 bg-stone-950 border border-amber-400/40 rounded shadow-2xl p-2 space-y-1.5 max-h-60 overflow-y-auto">
@@ -3223,10 +3505,17 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                               </div>
 
                               <div className="relative">
-                                <button
-                                  type="button"
+                                <div
+                                  role="button"
+                                  tabIndex={0}
                                   onClick={() => setShowMultiSelectDropdown(prev => ({ ...prev, meta: !prev.meta }))}
-                                  className="w-full bg-stone-950 border border-stone-800 hover:border-amber-400/60 p-2.5 rounded text-left flex items-center justify-between text-xs text-white"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      setShowMultiSelectDropdown(prev => ({ ...prev, meta: !prev.meta }));
+                                    }
+                                  }}
+                                  className="w-full bg-stone-950 border border-stone-800 hover:border-amber-400/60 p-2.5 rounded text-left flex items-center justify-between text-xs text-white cursor-pointer"
                                 >
                                   <div className="flex flex-wrap gap-1.5 items-center">
                                     {metaBidding.selectedMultiStrategies.length > 0 ? (
@@ -3242,7 +3531,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                                                 selectedMultiStrategies: prev.selectedMultiStrategies.filter(s => s !== strat)
                                               }));
                                             }}
-                                            className="hover:text-white ml-0.5"
+                                            className="hover:text-white ml-0.5 cursor-pointer"
                                           >
                                             ×
                                           </button>
@@ -3253,7 +3542,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                                     )}
                                   </div>
                                   <ChevronDown className="w-4 h-4 text-stone-400 shrink-0" />
-                                </button>
+                                </div>
 
                                 {showMultiSelectDropdown.meta && (
                                   <div className="absolute z-30 left-0 right-0 mt-1 bg-stone-950 border border-amber-400/40 rounded shadow-2xl p-2 space-y-1.5 max-h-60 overflow-y-auto">
@@ -3609,7 +3898,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                           </div>
                           <button
                             type="button"
-                            onClick={() => setStep(err.step)}
+                            onClick={() => navigateToStep(err.step as any)}
                             className="px-2 py-0.5 bg-amber-400/10 hover:bg-amber-400 text-amber-400 hover:text-black border border-amber-400/30 font-bold text-[10px] uppercase rounded transition-colors shrink-0 cursor-pointer"
                           >
                             Fix in Step {err.step} →
@@ -3691,12 +3980,24 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
               {step > 1 && (
                 <button
                   type="button"
-                  onClick={() => setStep((step - 1) as any)}
+                  onClick={() => navigateToStep((step - 1) as any)}
                   className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-stone-300 font-bold uppercase rounded cursor-pointer"
                 >
                   Back
                 </button>
               )}
+              <button
+                type="button"
+                onClick={async () => {
+                  await executeAutoSave(false);
+                  setAutoSaveStatus('saved');
+                }}
+                className="px-3 py-2 bg-stone-900 hover:bg-stone-800 border border-stone-700 hover:border-amber-400 text-stone-200 font-bold text-xs rounded cursor-pointer flex items-center gap-1.5 transition-colors"
+                title="Save current campaign draft to Firestore & LocalStorage"
+              >
+                <Save className="w-3.5 h-3.5 text-amber-400" />
+                <span>Save Draft</span>
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -3714,7 +4015,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
             {step < 4 ? (
               <button
                 type="button"
-                onClick={() => setStep((step + 1) as any)}
+                onClick={() => navigateToStep((step + 1) as any)}
                 className="px-5 py-2 bg-amber-400 hover:bg-amber-300 text-black font-bold uppercase tracking-wider rounded cursor-pointer flex items-center gap-2"
               >
                 <span>Next Step</span>
@@ -3849,7 +4150,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   handleClearActiveDraft();
                   setName('New Omnichannel Campaign');
                   setShowDraftsDrawer(false);
-                  setStep(1);
+                  navigateToStep(1);
                 }}
                 className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold rounded transition-colors cursor-pointer"
               >
@@ -3905,7 +4206,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   type="button"
                   onClick={() => {
                     setTourStepIndex(idx);
-                    setStep(s.wizardStep as any);
+                    navigateToStep(s.wizardStep as any);
                   }}
                   className={`py-1.5 px-2 rounded text-[10px] font-bold transition-all text-center border cursor-pointer ${
                     tourStepIndex === idx
@@ -3928,7 +4229,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                 </span>
                 <button
                   type="button"
-                  onClick={() => setStep(ONBOARDING_TOUR_STEPS[tourStepIndex].wizardStep as any)}
+                  onClick={() => navigateToStep(ONBOARDING_TOUR_STEPS[tourStepIndex].wizardStep as any)}
                   className="text-[10px] bg-stone-800 hover:bg-stone-700 text-stone-300 px-2.5 py-1 rounded border border-stone-700 transition-colors flex items-center gap-1 cursor-pointer"
                 >
                   <ArrowRight className="w-3 h-3 text-amber-400" />
@@ -3970,7 +4271,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                     onClick={() => {
                       const prevIdx = tourStepIndex - 1;
                       setTourStepIndex(prevIdx);
-                      setStep(ONBOARDING_TOUR_STEPS[prevIdx].wizardStep as any);
+                      navigateToStep(ONBOARDING_TOUR_STEPS[prevIdx].wizardStep as any);
                     }}
                     className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-bold rounded transition-colors cursor-pointer"
                   >
@@ -3984,7 +4285,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                     onClick={() => {
                       const nextIdx = tourStepIndex + 1;
                       setTourStepIndex(nextIdx);
-                      setStep(ONBOARDING_TOUR_STEPS[nextIdx].wizardStep as any);
+                      navigateToStep(ONBOARDING_TOUR_STEPS[nextIdx].wizardStep as any);
                     }}
                     className="px-4 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-bold rounded transition-colors cursor-pointer flex items-center gap-1"
                   >

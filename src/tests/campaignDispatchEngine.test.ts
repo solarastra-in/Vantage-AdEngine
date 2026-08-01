@@ -12,6 +12,7 @@ const baseCreative = {
   primaryText: 'Short body text well within limits.',
   callToAction: 'Learn More',
   mediaUrl: 'https://example.com/img.jpg',
+  destinationUrl: 'https://example.com',
 };
 
 const baseChannel: ChannelBudget = {

@@ -229,39 +229,41 @@ export function App() {
 
   // Submit New Campaign
   const handleCreateCampaign = async (payload: any) => {
-    try {
-      const res = await fetch('/api/campaigns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Org-Id': currentOrgId },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
+    const res = await fetch('/api/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Org-Id': currentOrgId },
+      body: JSON.stringify(payload),
+    });
 
-      if (data.campaign) {
-        setCampaigns(prev => [data.campaign, ...prev]);
-        // Persist to Firestore for tenant
-        await saveCampaignToFirestore(currentOrgId, data.campaign);
-      }
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || `Server returned ${res.status} while creating the campaign.`);
+    }
 
-      if (data.invoice) {
-        setInvoices(prev => [data.invoice, ...prev]);
-        // Persist invoice to Firestore
-        await saveInvoiceToFirestore(currentOrgId, data.invoice);
-      }
+    const data = await res.json();
 
-      // Campaign creation and publishing are genuinely separate server
-      // calls now (see the comment on POST /api/campaigns in server.ts for
-      // why: this used to be a fake setTimeout that always "succeeded"
-      // without ever calling a real platform). If the wizard's "Publish
-      // Now" toggle was on, actually invoke the real publish pipeline here
-      // -- passing the just-created campaign directly, since React state
-      // from setCampaigns above isn't guaranteed to be visible yet in this
-      // same call stack.
-      if (data.publishRequested && data.campaign) {
-        await handlePublishCampaign(data.campaign.id, data.campaign);
-      }
-    } catch (err) {
-      console.error('Create campaign error:', err);
+    if (data.campaign) {
+      setCampaigns(prev => [data.campaign, ...prev]);
+      // Persist to Firestore for tenant
+      await saveCampaignToFirestore(currentOrgId, data.campaign);
+    }
+
+    if (data.invoice) {
+      setInvoices(prev => [data.invoice, ...prev]);
+      // Persist invoice to Firestore
+      await saveInvoiceToFirestore(currentOrgId, data.invoice);
+    }
+
+    // Campaign creation and publishing are genuinely separate server
+    // calls now (see the comment on POST /api/campaigns in server.ts for
+    // why: this used to be a fake setTimeout that always "succeeded"
+    // without ever calling a real platform). If the wizard's "Publish
+    // Now" toggle was on, actually invoke the real publish pipeline here
+    // -- passing the just-created campaign directly, since React state
+    // from setCampaigns above isn't guaranteed to be visible yet in this
+    // same call stack.
+    if (data.publishRequested && data.campaign) {
+      await handlePublishCampaign(data.campaign.id, data.campaign);
     }
   };
 

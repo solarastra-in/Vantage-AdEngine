@@ -10,7 +10,7 @@ import {
   User 
 } from 'firebase/auth';
 import { 
-  getFirestore, 
+  initializeFirestore, 
   collection, 
   doc, 
   getDocs, 
@@ -42,7 +42,7 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // Firebase Auth & Firestore instances
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfigJson.firestoreDatabaseId || undefined);
+export const db = initializeFirestore(app, { ignoreUndefinedProperties: true }, firebaseConfigJson.firestoreDatabaseId || undefined);
 
 // Auth Providers
 export const googleProvider = new GoogleAuthProvider();
