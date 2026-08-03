@@ -94,7 +94,7 @@ export const DispatchReportBanner: React.FC<{ report: DispatchReportUI; onDismis
 
       {report.results.some(r => r.mode === 'DRY_RUN' || r.externalId?.startsWith('DRYRUN_')) && (
         <div className="mt-2.5 pt-2 border-t border-stone-800/80 text-[10px] text-amber-300/90 leading-snug">
-          💡 <span className="font-semibold">Dry-Run Mode:</span> Channels without connected API credentials run in Dry-Run mode. To publish directly to your live Google Ads or Meta account, configure API credentials in <span className="underline font-semibold">API Nexus</span>.
+          💡 <span className="font-semibold">Dry-Run Simulation Mode:</span> Dispatched in simulation mode via explicit toggle. To publish directly to live ad network APIs, disable Dry-Run mode and configure credentials in <span className="underline font-semibold">API Nexus</span>.
         </div>
       )}
 

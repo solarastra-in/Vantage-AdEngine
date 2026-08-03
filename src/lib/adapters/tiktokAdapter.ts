@@ -11,7 +11,7 @@ export const tiktokAdapter: PlatformAdapter = {
   platform: 'tiktok',
 
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
-    if (!credential) return dryRunResult('tiktok', payload);
+    if (!credential) throw new Error('TikTok Business API credentials not configured in Vault. To publish to production TikTok, enter Advertiser ID and Access Token in API Nexus, or enable the Dry-Run Mode toggle.');
 
     const { accountId, secret } = credential; // accountId = advertiser_id
 

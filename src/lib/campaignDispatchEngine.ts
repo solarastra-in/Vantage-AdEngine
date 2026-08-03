@@ -372,7 +372,7 @@ export interface DispatchReport {
 export async function dispatchCampaign(
   campaign: Campaign,
   credentialResolver: (platform: PlatformType) => ResolvedCredential | null | Promise<ResolvedCredential | null>,
-  opts: { partialAllowed?: boolean } = {}
+  opts: { partialAllowed?: boolean; dryRun?: boolean } = {}
 ): Promise<DispatchReport> {
   const startedAt = new Date().toISOString();
   const enabledChannels = campaign.channels.filter(c => c.enabled);
@@ -391,13 +391,22 @@ export async function dispatchCampaign(
           error: payload.issues.filter(i => i.severity === 'error').map(i => i.issue).join('; '),
         };
       }
+
+      // Explicit Dry-Run Mode Toggle
+      if (opts.dryRun) {
+        const dryAdapter = makeDryRunAdapter(channel.platform);
+        const { externalId, mode } = await dryAdapter.publish(payload, null);
+        return { platform: channel.platform, outcome: 'LIVE' as const, externalId, mode: mode ?? 'DRY_RUN' };
+      }
+
+      // Production Mode (Default) -- Dispatches to Live Ad Channel APIs
       const adapter = getAdapter(channel.platform);
       try {
         const credential = await credentialResolver(channel.platform);
         const { externalId, mode } = await adapter.publish(payload, credential);
-        return { platform: channel.platform, outcome: 'LIVE' as const, externalId, mode };
+        return { platform: channel.platform, outcome: 'LIVE' as const, externalId, mode: mode ?? 'LIVE' };
       } catch (err: any) {
-        return { platform: channel.platform, outcome: 'FAILED' as const, error: err.message };
+        return { platform: channel.platform, outcome: 'FAILED' as const, error: err.message || String(err) };
       }
     })
   );

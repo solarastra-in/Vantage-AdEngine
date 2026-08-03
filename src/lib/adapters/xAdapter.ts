@@ -13,7 +13,7 @@ export const xAdapter: PlatformAdapter = {
   platform: 'x',
 
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
-    if (!credential) return dryRunResult('x', payload);
+    if (!credential) throw new Error('X Ads API credentials not configured in Vault. To publish to production X Ads, enter Account ID and Bearer Token in API Nexus, or enable the Dry-Run Mode toggle.');
 
     const { accountId, secret } = credential;
 

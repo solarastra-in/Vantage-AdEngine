@@ -11,7 +11,7 @@ export const pinterestAdapter: PlatformAdapter = {
   platform: 'pinterest',
 
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
-    if (!credential) return dryRunResult('pinterest', payload);
+    if (!credential) throw new Error('Pinterest Ads API credentials not configured in Vault. To publish to production Pinterest, enter Ad Account ID and Access Token in API Nexus, or enable the Dry-Run Mode toggle.');
 
     const { accountId, secret } = credential; // accountId = ad_account_id
 

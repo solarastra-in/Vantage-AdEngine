@@ -204,4 +204,17 @@ describe('campaignDispatchEngine: saga-style dispatch with compensation', () => 
     expect(googleResult.outcome).toBe('SKIPPED_VALIDATION');
     expect(rollbackCalls).toContain('meta');
   });
+
+  test('when dryRun: true option is passed, dispatches in dry-run mode without invoking live adapters or throwing credential errors', async () => {
+    const campaign = makeCampaign([
+      { ...baseChannel, platform: 'meta', platformName: 'Meta' },
+      { ...baseChannel, platform: 'google', platformName: 'Google', budget: 1000 },
+    ]);
+
+    const report = await dispatchCampaign(campaign, () => null, { dryRun: true });
+    expect(report.overallStatus).toBe('ALL_LIVE');
+    expect(report.results.every(r => r.outcome === 'LIVE' && r.mode === 'DRY_RUN')).toBe(true);
+    expect(report.results[0].externalId).toMatch(/^DRYRUN_meta_/);
+    expect(report.results[1].externalId).toMatch(/^DRYRUN_google_/);
+  });
 });

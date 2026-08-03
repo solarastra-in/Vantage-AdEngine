@@ -17,7 +17,7 @@ export const metaAdapter: PlatformAdapter = {
   platform: 'meta',
 
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
-    if (!credential) return dryRunResult('meta', payload);
+    if (!credential) throw new Error('Meta Marketing API credentials not configured in Vault. To publish to production Meta, enter Meta Ad Account ID and Access Token in API Nexus, or enable the Dry-Run Mode toggle.');
 
     const { accountId, secret } = credential;
 

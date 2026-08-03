@@ -171,12 +171,25 @@ app.post('/api/campaigns', withValidation((req, res) => {
     }
   }
 
+  const targetId = body.id || `cmp-${Date.now().toString().slice(-4)}`;
+  const existingIndex = campaigns.findIndex(c => c.id === targetId || (body.id && c.id === body.id));
+
+  if (existingIndex >= 0) {
+    campaigns[existingIndex] = {
+      ...campaigns[existingIndex],
+      ...body,
+      orgId,
+      totalBudget: Number(body.totalBudget) || campaigns[existingIndex].totalBudget,
+    };
+    return res.json({ campaign: campaigns[existingIndex], invoice: null, publishRequested: !!body.publishNow, dryRunMode: !!body.dryRunMode });
+  }
+
   const newCampaign: Campaign = {
-    id: `cmp-${Date.now().toString().slice(-4)}`,
+    id: targetId,
     orgId,
     name: body.name || 'Untitled Campaign',
     objective: body.objective || 'Lead Generation',
-    status: 'draft',
+    status: body.status || 'draft',
     totalBudget: Number(body.totalBudget) || 10000,
     spentBudget: 0,
     startDate: body.startDate || new Date().toISOString().split('T')[0],
@@ -239,16 +252,18 @@ app.post('/api/campaigns', withValidation((req, res) => {
   // immediately after this call succeeds (see handleCreateCampaign in
   // App.tsx) -- that endpoint actually resolves credentials from the vault
   // and calls each platform's real adapter.
-  res.status(201).json({ campaign: newCampaign, invoice: newInvoice, publishRequested: !!body.publishNow });
+  res.status(201).json({ campaign: newCampaign, invoice: newInvoice, publishRequested: !!body.publishNow, dryRunMode: !!body.dryRunMode });
 }));
 
 app.put('/api/campaigns/:id', (req, res) => {
   const index = campaigns.findIndex(c => c.id === req.params.id);
   if (index === -1) {
-    return res.status(404).json({ error: 'Campaign not found' });
+    const updated = { id: req.params.id, ...req.body };
+    campaigns.unshift(updated);
+    return res.json({ campaign: updated, publishRequested: !!req.body.publishNow, dryRunMode: !!req.body.dryRunMode });
   }
   campaigns[index] = { ...campaigns[index], ...req.body };
-  res.json(campaigns[index]);
+  res.json({ campaign: campaigns[index], publishRequested: !!req.body.publishNow, dryRunMode: !!req.body.dryRunMode });
 });
 
 app.delete('/api/campaigns/:id', (req, res) => {
@@ -311,8 +326,15 @@ app.post('/api/campaigns/:id/publish', async (req, res) => {
     status: 'publishing',
   }));
 
+  const dryRun = req.body?.dryRun === true || req.query?.dryRun === 'true';
+  const partialAllowed = req.body?.partialAllowed === true || req.query?.partialAllowed === 'true';
+
   try {
-    const report = await dispatchCampaign(campaign, (platform) => getResolvedCredential(orgId, platform));
+    const report = await dispatchCampaign(
+      campaign,
+      (platform) => getResolvedCredential(orgId, platform),
+      { dryRun, partialAllowed }
+    );
 
     campaign.status = report.overallStatus === 'ALL_LIVE' ? 'active'
       : report.overallStatus === 'PARTIAL' ? 'active'
@@ -754,7 +776,7 @@ app.get('/api/channels/credentials-info', (req, res) => {
     const isConfigured = !!stored;
     return {
       ...p,
-      status: isConfigured ? 'LIVE_CREDENTIALS_CONFIGURED' : 'DRY_RUN_NO_CREDENTIALS',
+      status: isConfigured ? 'LIVE_CREDENTIALS_CONFIGURED' : 'NOT_CONFIGURED',
       accountId: stored?.accountId || '',
     };
   });
@@ -762,13 +784,11 @@ app.get('/api/channels/credentials-info', (req, res) => {
   const liveCount = channelsInfo.filter(c => c.status === 'LIVE_CREDENTIALS_CONFIGURED').length;
 
   res.json({
-    mode: liveCount === channelsInfo.length ? 'ALL_LIVE' : liveCount > 0 ? 'HYBRID' : 'DRY_RUN',
+    mode: liveCount === channelsInfo.length ? 'ALL_LIVE' : 'PRODUCTION_DEFAULT',
     notice:
       liveCount === channelsInfo.length
-        ? 'All channels have vault credentials configured -- campaign publish will make real API calls.'
-        : liveCount > 0
-        ? `Hybrid mode: ${liveCount}/${channelsInfo.length} channels configured. Configured channels dispatch live; unconfigured run dry-run.`
-        : 'Dry-run mode active for all channels -- no platform credentials configured in vault. Publish will run real transforms and validations, then issue dry-run identifiers without contacting external ad networks.',
+        ? 'All ad channels have vault credentials configured -- campaign publish will make live production API calls.'
+        : `Production Mode Active (${liveCount}/${channelsInfo.length} configured). Unconfigured channels will report missing credentials unless Dry-Run Simulation Mode toggle is enabled.`,
     channels: channelsInfo,
   });
 });

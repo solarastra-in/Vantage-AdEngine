@@ -13,7 +13,7 @@ export const linkedinAdapter: PlatformAdapter = {
   platform: 'linkedin',
 
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
-    if (!credential) return dryRunResult('linkedin', payload);
+    if (!credential) throw new Error('LinkedIn Marketing API credentials not configured in Vault. To publish to production LinkedIn, enter Sponsored Account ID and Access Token in API Nexus, or enable the Dry-Run Mode toggle.');
 
     const { accountId, secret, extra } = credential;
 

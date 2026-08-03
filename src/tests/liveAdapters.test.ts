@@ -22,19 +22,12 @@ const validPayload: PlatformPayload = {
   googleKeywords: ['test keyword'],
 };
 
-describe('live adapters: dry-run fallback with no credential', () => {
-  test('meta adapter returns DRY_RUN mode when credential is null, without making a network call', async () => {
+describe('live adapters: behavior when credential is null in Production mode', () => {
+  test('meta adapter throws error when credential is null in Production mode, without making a network call', async () => {
     const fetchSpy = jest.spyOn(global, 'fetch');
-    const result = await metaAdapter.publish(validPayload, null);
-    expect(result.mode).toBe('DRY_RUN');
-    expect(result.externalId).toMatch(/^DRYRUN_meta_/);
+    await expect(metaAdapter.publish(validPayload, null)).rejects.toThrow(/Meta Marketing API credentials not configured/);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
-  });
-
-  test('adapters with blocking validation errors still throw in dry-run mode (validation is not skipped)', async () => {
-    const invalidPayload = { ...validPayload, mediaUrl: '', issues: [{ field: 'mediaUrl', issue: 'missing', severity: 'error' as const }] };
-    await expect(metaAdapter.publish(invalidPayload, null)).rejects.toThrow(/Validation failed/);
   });
 });
 

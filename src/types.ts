@@ -119,6 +119,17 @@ export interface Campaign {
     roas: number;
   };
   abTestConfig?: AbTestConfig;
+  biddingMechanisms?: {
+    meta?: any;
+    google?: any;
+    linkedin?: any;
+    tiktok?: any;
+    pinterest?: any;
+    x?: any;
+    programmatic?: any;
+  };
+  customerName?: string;
+  customerEmail?: string;
   createdAt: string;
   activityLog?: CampaignActivityEntry[];
 }

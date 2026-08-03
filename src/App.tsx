@@ -77,6 +77,7 @@ export function App() {
   // Selected Item Modals
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
 
   // Main Data States for Active Tenant
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -197,7 +198,19 @@ export function App() {
         fetchChannelsFromFirestore(orgId),
       ]);
 
-      setCampaigns(cmpList);
+      // Deduplicate campaigns to remove stale auto-save draft duplicates
+      const deduplicatedCmpList = cmpList.filter((cmp, index, self) => {
+        if (cmp.id.startsWith('cmp-draft-')) {
+          const hasRealDoc = self.some(other => other.id !== cmp.id && (other.name.trim().toLowerCase() === cmp.name.trim().toLowerCase() || !other.id.startsWith('cmp-draft-')));
+          if (hasRealDoc) {
+            deleteCampaignFromFirestore(orgId, cmp.id).catch(() => {});
+            return false;
+          }
+        }
+        return true;
+      });
+
+      setCampaigns(deduplicatedCmpList);
       setInvoices(invList);
       setChannels(chList);
 
@@ -227,25 +240,43 @@ export function App() {
     setViewState('portal');
   };
 
-  // Submit New Campaign
+  // Edit Existing Campaign Handler
+  const handleEditCampaign = (campaign: Campaign) => {
+    setEditingCampaign(campaign);
+    setAiWizardInitialData(null);
+    setIsWizardOpen(true);
+  };
+
+  // Submit New or Updated Campaign
   const handleCreateCampaign = async (payload: any) => {
-    const res = await fetch('/api/campaigns', {
-      method: 'POST',
+    const isEditing = payload.id && campaigns.some(c => c.id === payload.id);
+    const url = isEditing ? `/api/campaigns/${payload.id}` : '/api/campaigns';
+    const method = isEditing ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json', 'X-Org-Id': currentOrgId },
       body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || `Server returned ${res.status} while creating the campaign.`);
+      throw new Error(errBody.error || `Server returned ${res.status} while saving the campaign.`);
     }
 
     const data = await res.json();
+    const savedCampaign = data.campaign || (data.id ? data : null);
 
-    if (data.campaign) {
-      setCampaigns(prev => [data.campaign, ...prev]);
+    if (savedCampaign) {
+      setCampaigns(prev => {
+        const exists = prev.some(c => c.id === savedCampaign.id);
+        if (exists) {
+          return prev.map(c => c.id === savedCampaign.id ? { ...c, ...savedCampaign } : c);
+        }
+        return [savedCampaign, ...prev];
+      });
       // Persist to Firestore for tenant
-      await saveCampaignToFirestore(currentOrgId, data.campaign);
+      await saveCampaignToFirestore(currentOrgId, savedCampaign);
     }
 
     if (data.invoice) {
@@ -254,21 +285,13 @@ export function App() {
       await saveInvoiceToFirestore(currentOrgId, data.invoice);
     }
 
-    // Campaign creation and publishing are genuinely separate server
-    // calls now (see the comment on POST /api/campaigns in server.ts for
-    // why: this used to be a fake setTimeout that always "succeeded"
-    // without ever calling a real platform). If the wizard's "Publish
-    // Now" toggle was on, actually invoke the real publish pipeline here
-    // -- passing the just-created campaign directly, since React state
-    // from setCampaigns above isn't guaranteed to be visible yet in this
-    // same call stack.
-    if (data.publishRequested && data.campaign) {
-      await handlePublishCampaign(data.campaign.id, data.campaign);
+    if ((data.publishRequested || payload.publishNow) && savedCampaign) {
+      await handlePublishCampaign(savedCampaign.id, savedCampaign, { dryRun: Boolean(data.dryRunMode || payload.dryRunMode) });
     }
   };
 
   // Single-Click Cross-Platform API Dispatch
-  const handlePublishCampaign = async (campaignId: string, campaignOverride?: Campaign) => {
+  const handlePublishCampaign = async (campaignId: string, campaignOverride?: Campaign, options?: { dryRun?: boolean }) => {
     try {
       setCampaigns(prev =>
         prev.map(c =>
@@ -281,7 +304,12 @@ export function App() {
       const idempotencyKey = `pub_${campaignId}_${crypto.randomUUID()}`;
       const res = await fetch(`/api/campaigns/${campaignId}/publish`, {
         method: 'POST',
-        headers: { 'Idempotency-Key': idempotencyKey, 'X-Org-Id': currentOrgId },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+          'X-Org-Id': currentOrgId,
+        },
+        body: JSON.stringify({ dryRun: options?.dryRun ?? false }),
       });
       const data = await res.json();
 
@@ -786,12 +814,14 @@ Specifically:
                     <CampaignManager
                       campaigns={campaigns}
                       onOpenWizard={() => {
+                        setEditingCampaign(null);
                         setAiWizardInitialData(null);
                         setIsWizardOpen(true);
                       }}
                       onSelectCampaign={(c) => setSelectedCampaign(c)}
+                      onEditCampaign={handleEditCampaign}
                       onToggleStatus={handleToggleCampaignStatus}
-                      onPublishCampaign={handlePublishCampaign}
+                      onPublishCampaign={(id, opts) => handlePublishCampaign(id, undefined, opts)}
                       onBulkPause={handleBulkPause}
                       onBulkResume={handleBulkResume}
                       onBulkDuplicate={handleBulkDuplicate}
@@ -860,10 +890,12 @@ Specifically:
       {/* Global Modals */}
       <CampaignWizardModal
         isOpen={isWizardOpen}
+        editingCampaign={editingCampaign}
         orgId={currentOrgId}
         initialAiData={aiWizardInitialData}
         onClose={() => {
           setIsWizardOpen(false);
+          setEditingCampaign(null);
           setAiWizardInitialData(null);
         }}
         onSubmitCampaign={handleCreateCampaign}
@@ -879,8 +911,9 @@ Specifically:
       <CampaignDetailModal
         campaign={selectedCampaign}
         onClose={() => setSelectedCampaign(null)}
+        onEdit={handleEditCampaign}
         onToggleStatus={handleToggleCampaignStatus}
-        onPublish={handlePublishCampaign}
+        onPublish={(id, opts) => handlePublishCampaign(id, undefined, opts)}
         onDelete={handleDeleteCampaign}
       />
 

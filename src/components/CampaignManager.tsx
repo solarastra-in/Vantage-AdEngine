@@ -20,15 +20,17 @@ import {
   X,
   Layers,
   Sparkles,
-  Trash2
+  Trash2,
+  Edit3
 } from 'lucide-react';
 
 interface CampaignManagerProps {
   campaigns: Campaign[];
   onOpenWizard: () => void;
   onSelectCampaign: (campaign: Campaign) => void;
+  onEditCampaign?: (campaign: Campaign) => void;
   onToggleStatus: (campaignId: string) => void;
-  onPublishCampaign: (campaignId: string) => void;
+  onPublishCampaign: (campaignId: string, options?: { dryRun?: boolean }) => void;
   onDeleteCampaign?: (campaignId: string) => void;
   onBulkPause?: (campaignIds: string[]) => void;
   onBulkResume?: (campaignIds: string[]) => void;
@@ -40,6 +42,7 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
   campaigns,
   onOpenWizard,
   onSelectCampaign,
+  onEditCampaign,
   onToggleStatus,
   onPublishCampaign,
   onDeleteCampaign,
@@ -52,6 +55,7 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'publishing' | 'paused' | 'draft'>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
+  const [isDryRunMode, setIsDryRunMode] = useState(false);
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{
     type: 'single' | 'bulk';
     id?: string;
@@ -181,13 +185,31 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={onOpenWizard}
-          className="bg-amber-400 text-black px-6 py-2.5 text-xs font-bold uppercase tracking-widest cursor-pointer hover:bg-amber-300 transition-colors shadow-lg shadow-amber-400/10 rounded-sm flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4 stroke-[3]" />
-          <span>New Multi-Channel Campaign</span>
-        </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="bg-stone-900 border border-stone-800 px-3 py-1.5 rounded flex items-center gap-2 font-mono text-xs">
+            <span className={`w-2 h-2 rounded-full ${!isDryRunMode ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+            <span className="text-stone-300 font-bold uppercase text-[10px]">
+              {!isDryRunMode ? 'Production Mode' : 'Dry-Run Mode'}
+            </span>
+            <label className="relative inline-flex items-center cursor-pointer ml-1">
+              <input
+                type="checkbox"
+                checked={isDryRunMode}
+                onChange={e => setIsDryRunMode(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-8 h-4.5 bg-stone-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-amber-400"></div>
+            </label>
+          </div>
+
+          <button
+            onClick={onOpenWizard}
+            className="bg-amber-400 text-black px-6 py-2.5 text-xs font-bold uppercase tracking-widest cursor-pointer hover:bg-amber-300 transition-colors shadow-lg shadow-amber-400/10 rounded-sm flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>New Multi-Channel Campaign</span>
+          </button>
+        </div>
       </div>
 
       {/* Bulk Action Status Toast/Notice */}
@@ -365,9 +387,24 @@ export const CampaignManager: React.FC<CampaignManagerProps> = ({
 
                 {/* Action Buttons */}
                 <div className="flex items-center gap-2">
+                  {onEditCampaign && (
+                    <button
+                      onClick={() => onEditCampaign(campaign)}
+                      className={`px-3 py-2 text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-1.5 rounded-xs ${
+                        campaign.status === 'draft'
+                          ? 'bg-stone-800 hover:bg-stone-700 text-amber-300 border border-stone-700 hover:border-amber-400'
+                          : 'bg-stone-900 hover:bg-stone-800 border border-stone-700 text-stone-200'
+                      }`}
+                      title={campaign.status === 'draft' ? "Edit campaign draft settings, creative & budget" : "Edit campaign parameters"}
+                    >
+                      <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{campaign.status === 'draft' ? 'Edit Draft' : 'Edit'}</span>
+                    </button>
+                  )}
+
                   {campaign.status === 'draft' || campaign.status === 'paused' ? (
                     <button
-                      onClick={() => onPublishCampaign(campaign.id)}
+                      onClick={() => onPublishCampaign(campaign.id, { dryRun: isDryRunMode })}
                       className="bg-amber-400 hover:bg-amber-300 text-black px-4 py-2 text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-1.5 rounded-xs"
                     >
                       <Zap className="w-3.5 h-3.5 fill-black" />

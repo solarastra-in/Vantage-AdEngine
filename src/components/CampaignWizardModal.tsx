@@ -60,6 +60,7 @@ import { AbTestFramework } from './AbTestFramework';
 
 interface CampaignWizardModalProps {
   isOpen: boolean;
+  editingCampaign?: Campaign | null;
   orgId?: string;
   onClose: () => void;
   onSubmitCampaign: (campaignData: any) => void;
@@ -69,12 +70,14 @@ interface CampaignWizardModalProps {
 
 export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   isOpen,
+  editingCampaign,
   orgId,
   onClose,
   onSubmitCampaign,
   onOptimizeWithAi,
   initialAiData,
 }) => {
+  const activeDraftCampaignIdRef = React.useRef<string | null>(null);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAiOptimizing, setIsAiOptimizing] = useState(false);
@@ -473,6 +476,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
   // STEP 4: Invoicing & Billing
   const [publishNow, setPublishNow] = useState(true);
+  const [isDryRunMode, setIsDryRunMode] = useState(false);
   const [autoPay, setAutoPay] = useState(true);
   const [customerName, setCustomerName] = useState('Astra Cloud Systems Inc.');
   const [customerEmail, setCustomerEmail] = useState('billing@astracloud.io');
@@ -939,8 +943,11 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       // 3. Save draft Campaign record to Firestore if campaign name is specified
       if (name && name.trim().length > 0) {
         const activeChannels = selectedChannels.filter(c => c.enabled);
+        const draftCampaignId = activeDraftCampaignIdRef.current || `cmp-draft-${tenantOrgId.slice(-4)}-${crypto.randomUUID().slice(0, 8)}`;
+        activeDraftCampaignIdRef.current = draftCampaignId;
+
         const draftCampaignObj: Campaign = {
-          id: `cmp-draft-${tenantOrgId.slice(-4)}-${name.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+          id: draftCampaignId,
           orgId: tenantOrgId,
           name: name.trim(),
           objective: objective || 'Lead Generation',
@@ -1061,6 +1068,66 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     setShowDraftsDrawer(false);
   };
 
+  // Helper to pre-fill wizard state from an existing Campaign object for editing
+  const handleApplyCampaign = (campaign: Campaign) => {
+    if (!campaign) return;
+    activeDraftCampaignIdRef.current = campaign.id;
+    if (campaign.name !== undefined) setName(campaign.name);
+    if (campaign.objective !== undefined) setObjective(campaign.objective as any);
+    if (campaign.targetAudience !== undefined) setTargetAudience(campaign.targetAudience);
+    if (campaign.totalBudget !== undefined) setTotalBudget(campaign.totalBudget);
+    if (campaign.startDate !== undefined) setStartDate(campaign.startDate);
+    if (campaign.endDate !== undefined) setEndDate(campaign.endDate);
+
+    if (campaign.creative) {
+      if (campaign.creative.headline !== undefined) setHeadline(campaign.creative.headline);
+      if (campaign.creative.primaryText !== undefined) setPrimaryText(campaign.creative.primaryText);
+      if (campaign.creative.callToAction !== undefined) setCallToAction(campaign.creative.callToAction);
+      if (campaign.creative.mediaUrl !== undefined) setMasterMediaUrl(campaign.creative.mediaUrl);
+      if (campaign.creative.destinationUrl !== undefined) setDestinationUrl(campaign.creative.destinationUrl);
+      if (campaign.creative.googleKeywords !== undefined) setGoogleKeywords(campaign.creative.googleKeywords);
+      if (campaign.creative.googleRsaHeadlines !== undefined) setGoogleRsaHeadlines(campaign.creative.googleRsaHeadlines);
+      if (campaign.creative.googleRsaDescriptions !== undefined) setGoogleRsaDescriptions(campaign.creative.googleRsaDescriptions);
+    }
+
+    if (campaign.platformImages) setPlatformImages(campaign.platformImages as any);
+    if (campaign.platformCopy) setPlatformCopy(campaign.platformCopy);
+
+    if (campaign.channels && campaign.channels.length > 0) {
+      setSelectedChannels(prev => {
+        return prev.map(ch => {
+          const existingChannel = campaign.channels.find(c => c.platform === ch.platform);
+          if (existingChannel) {
+            return {
+              ...ch,
+              budget: existingChannel.budget,
+              enabled: existingChannel.enabled !== false,
+              targeting: existingChannel.targeting || ch.targeting,
+              startDate: existingChannel.startDate || ch.startDate,
+              endDate: existingChannel.endDate || ch.endDate,
+            };
+          }
+          return { ...ch, enabled: false };
+        });
+      });
+    }
+
+    if (campaign.biddingMechanisms) {
+      if (campaign.biddingMechanisms.meta) setMetaBidding(prev => ({ ...prev, ...campaign.biddingMechanisms?.meta }));
+      if (campaign.biddingMechanisms.google) setGoogleBidding(prev => ({ ...prev, ...campaign.biddingMechanisms?.google }));
+      if (campaign.biddingMechanisms.linkedin) setLinkedinBidding(prev => ({ ...prev, ...campaign.biddingMechanisms?.linkedin }));
+      if (campaign.biddingMechanisms.tiktok) setTikTokBidding(prev => ({ ...prev, ...campaign.biddingMechanisms?.tiktok }));
+      if (campaign.biddingMechanisms.pinterest) setPinterestBidding(prev => ({ ...prev, ...campaign.biddingMechanisms?.pinterest }));
+      if (campaign.biddingMechanisms.x) setXBidding(prev => ({ ...prev, ...campaign.biddingMechanisms?.x }));
+      if (campaign.biddingMechanisms.programmatic) setDspBidding(prev => ({ ...prev, ...campaign.biddingMechanisms?.programmatic }));
+    }
+
+    if (campaign.abTestConfig) setAbTestConfig(campaign.abTestConfig);
+    if (campaign.customerName) setCustomerName(campaign.customerName);
+    if (campaign.customerEmail) setCustomerEmail(campaign.customerEmail);
+    setAutoSaveStatus('restored');
+  };
+
   // Helper to delete a draft from both Firestore & LocalStorage
   const handleDeleteDraft = async (draftId: string) => {
     try {
@@ -1097,6 +1164,13 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   useEffect(() => {
     let isCancelled = false;
     if (isOpen) {
+      if (editingCampaign) {
+        handleApplyCampaign(editingCampaign);
+      } else {
+        if (!activeDraftCampaignIdRef.current) {
+          activeDraftCampaignIdRef.current = `cmp-draft-${tenantOrgId.slice(-4)}-${crypto.randomUUID().slice(0, 8)}`;
+        }
+      }
       loadAllDrafts();
 
       // Check LocalStorage first for instant restore availability
@@ -1111,7 +1185,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       fetchWizardDraftFromFirestore(tenantOrgId).then((firestoreDraft) => {
         if (isCancelled) return;
         const draftToUse = firestoreDraft || localDraft;
-        if (draftToUse && draftToUse.stepData && draftToUse.stepData.name) {
+        if (!editingCampaign && draftToUse && draftToUse.stepData && draftToUse.stepData.name) {
           setActiveDraftNotification({
             name: draftToUse.stepData.name || 'Untitled Draft',
             updatedAtTime: draftToUse.updatedAt ? new Date(draftToUse.updatedAt).toLocaleTimeString() : 'Recently',
@@ -1121,11 +1195,13 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
           });
         }
       });
+    } else {
+      activeDraftCampaignIdRef.current = null;
     }
     return () => {
       isCancelled = true;
     };
-  }, [isOpen, tenantOrgId]);
+  }, [isOpen, editingCampaign, tenantOrgId]);
 
   // 1. Recurring 30-Second Auto-Save Interval Timer
   useEffect(() => {
@@ -1823,6 +1899,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
     }
 
     const campaignPayload = {
+      id: activeDraftCampaignIdRef.current || undefined,
       name,
       objective,
       targetAudience,
@@ -1863,6 +1940,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
         enabled: true,
       })),
       publishNow,
+      dryRunMode: isDryRunMode,
       autoPay,
       customerName,
       customerEmail,
@@ -4164,6 +4242,44 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Dispatch Mode Selector Card */}
+              <div className="bg-stone-950 border border-stone-800 p-4 rounded-lg space-y-3 font-mono">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-stone-800 pb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                        Ad Network API Execution Mode
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                        !isDryRunMode
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                          : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                      }`}>
+                        {!isDryRunMode ? 'PRODUCTION MODE (LIVE APIs)' : 'DRY-RUN SIMULATION MODE'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-300 font-sans mt-1">
+                      {!isDryRunMode
+                        ? 'Production Mode is active by default. Campaign publish will make real API calls to configured channel credentials. If credentials fail or are unconfigured, dispatch will report the exact API error.'
+                        : 'Dry-Run Simulation Mode is enabled. Campaign dispatch will perform local transforms and validations without contacting live ad network endpoints.'}
+                    </p>
+                  </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
+                    <input
+                      type="checkbox"
+                      checked={isDryRunMode}
+                      onChange={e => setIsDryRunMode(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-stone-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-400"></div>
+                    <span className="ml-2 text-xs font-bold text-stone-200">
+                      Enable Dry-Run Mode
+                    </span>
+                  </label>
+                </div>
+              </div>
 
               {/* Billing Info */}
               <div className="bg-stone-950 border border-stone-800 p-4 rounded grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">

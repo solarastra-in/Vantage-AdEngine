@@ -83,7 +83,7 @@ export const googleAdapter: PlatformAdapter = {
    *    names or treating a partial result as a success.
    */
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
-    if (!credential) return dryRunResult('google', payload);
+    if (!credential) throw new Error('Google Ads API credentials not configured in Vault. To publish to production Google Ads, enter Customer ID, Developer Token, and Access Token in API Nexus, or enable the Dry-Run Mode toggle.');
 
     const { secret, extra } = credential;
     validateAccessTokenFormat(secret);

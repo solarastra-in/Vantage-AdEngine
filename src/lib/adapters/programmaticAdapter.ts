@@ -9,7 +9,7 @@ export const programmaticAdapter: PlatformAdapter = {
   platform: 'programmatic',
 
   async publish(payload: PlatformPayload, credential: ResolvedCredential | null) {
-    if (!credential) return dryRunResult('programmatic', payload);
+    if (!credential) throw new Error('Programmatic DSP API credentials not configured in Vault. To publish to production DSP, enter Seat ID and Auth Secret in API Nexus, or enable the Dry-Run Mode toggle.');
 
     const { accountId, secret, extra } = credential; // accountId = DSP seat ID
 

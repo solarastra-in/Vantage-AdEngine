@@ -35,8 +35,9 @@ interface CampaignDetailModalProps {
   campaign: Campaign | null;
   onClose: () => void;
   onToggleStatus: (id: string) => void;
-  onPublish: (id: string) => void;
+  onPublish: (id: string, options?: { dryRun?: boolean }) => void;
   onDelete?: (id: string) => void;
+  onEdit?: (campaign: Campaign) => void;
 }
 
 // Helper to generate full activity timeline entries for a campaign
@@ -232,6 +233,7 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
   onToggleStatus,
   onPublish,
   onDelete,
+  onEdit,
 }) => {
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -378,17 +380,33 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
             </button>
           </div>
 
-          <button
-            onClick={() => onToggleStatus(campaign.id)}
-            className={`px-3 py-1 text-[11px] font-bold uppercase tracking-wider rounded border cursor-pointer flex items-center gap-1.5 ${
-              campaign.status === 'active'
-                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-            }`}
-          >
-            {campaign.status === 'active' ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-            <span>{campaign.status === 'active' ? 'Pause Campaign' : 'Resume Campaign'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onEdit && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onEdit(campaign);
+                }}
+                className="px-3 py-1 bg-stone-800 hover:bg-stone-700 text-amber-300 border border-stone-700 hover:border-amber-400 text-[11px] font-bold uppercase tracking-wider rounded cursor-pointer flex items-center gap-1.5 transition-colors"
+                title="Edit campaign settings, creatives & channel budgets"
+              >
+                <Edit3 className="w-3 h-3 text-amber-400" />
+                <span>{campaign.status === 'draft' ? 'Edit Draft' : 'Edit Campaign'}</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => onToggleStatus(campaign.id)}
+              className={`px-3 py-1 text-[11px] font-bold uppercase tracking-wider rounded border cursor-pointer flex items-center gap-1.5 ${
+                campaign.status === 'active'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+              }`}
+            >
+              {campaign.status === 'active' ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+              <span>{campaign.status === 'active' ? 'Pause Campaign' : 'Resume Campaign'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}
@@ -466,42 +484,84 @@ export const CampaignDetailModal: React.FC<CampaignDetailModalProps> = ({
                       {campaign.channels.map(ch => {
                         const publishStatus = campaign.publishStatuses.find(ps => ps.platform === ch.platform);
                         return (
-                          <tr key={ch.platform} className="hover:bg-stone-900/40">
-                            <td className="py-3 px-4 text-white font-bold">{ch.platformName}</td>
-                            <td className="py-3 px-4 text-stone-400">{ch.targeting}</td>
-                            <td className="py-3 px-4 text-right text-stone-200">${ch.budget.toLocaleString()}</td>
-                            <td className="py-3 px-4 text-stone-400">
-                              {publishStatus?.externalId ? (
-                                publishStatus.externalId.startsWith('DRYRUN_') ? (
-                                  <span className="text-amber-400/90 font-mono text-[11px]" title="Dry-Run mode (No API Credentials configured)">
-                                    {publishStatus.externalId} <span className="text-[9px] bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1 py-0.5 rounded-xs ml-1">Dry-Run</span>
-                                  </span>
+                          <React.Fragment key={ch.platform}>
+                            <tr className="hover:bg-stone-900/40">
+                              <td className="py-3 px-4 text-white font-bold">{ch.platformName}</td>
+                              <td className="py-3 px-4 text-stone-400">{ch.targeting}</td>
+                              <td className="py-3 px-4 text-right text-stone-200">${ch.budget.toLocaleString()}</td>
+                              <td className="py-3 px-4 text-stone-400">
+                                {publishStatus?.externalId ? (
+                                  publishStatus.externalId.startsWith('DRYRUN_') ? (
+                                    <span className="text-amber-400/90 font-mono text-[11px]" title="Dry-Run mode (No API Credentials configured)">
+                                      {publishStatus.externalId} <span className="text-[9px] bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1 py-0.5 rounded-xs ml-1">Dry-Run</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-400 font-mono text-[11px]" title="Live Production API Dispatch">
+                                      {publishStatus.externalId} <span className="text-[9px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1 py-0.5 rounded-xs ml-1">Live API</span>
+                                    </span>
+                                  )
+                                ) : publishStatus?.status === 'failed' ? (
+                                  <span className="text-rose-400 font-mono text-[11px]">Dispatch Failed</span>
                                 ) : (
-                                  <span className="text-emerald-400 font-mono text-[11px]" title="Live Production API Dispatch">
-                                    {publishStatus.externalId} <span className="text-[9px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1 py-0.5 rounded-xs ml-1">Live API</span>
-                                  </span>
-                                )
-                              ) : (
-                                'Pending Dispatch'
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-right">
-                              <span className={`px-2 py-0.5 rounded-xs text-[10px] uppercase font-bold ${
-                                publishStatus?.status === 'live' 
-                                  ? (publishStatus.externalId?.startsWith('DRYRUN_') ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20' : 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20')
-                                  : 'text-stone-400 bg-stone-800 border border-stone-700'
-                              }`}>
-                                {publishStatus?.status === 'live' 
-                                  ? (publishStatus.externalId?.startsWith('DRYRUN_') ? 'Dry-Run OK' : 'Live') 
-                                  : (publishStatus?.status || 'draft')}
-                              </span>
-                            </td>
-                          </tr>
+                                  'Pending Dispatch'
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <span className={`px-2 py-0.5 rounded-xs text-[10px] uppercase font-bold ${
+                                  publishStatus?.status === 'live' 
+                                    ? (publishStatus.externalId?.startsWith('DRYRUN_') ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20' : 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20')
+                                    : publishStatus?.status === 'failed'
+                                    ? 'text-rose-400 bg-rose-500/10 border border-rose-500/20'
+                                    : 'text-stone-400 bg-stone-800 border border-stone-700'
+                                }`}>
+                                  {publishStatus?.status === 'live' 
+                                    ? (publishStatus.externalId?.startsWith('DRYRUN_') ? 'Dry-Run OK' : 'Live') 
+                                    : (publishStatus?.status || 'draft')}
+                                </span>
+                              </td>
+                            </tr>
+                            {publishStatus?.error && (
+                              <tr className="bg-rose-500/5">
+                                <td colSpan={5} className="py-2 px-4 text-[11px] font-mono text-rose-300 border-t border-rose-500/20">
+                                  <div className="flex items-start gap-2">
+                                    <span className="font-bold text-rose-400">API Error ({ch.platformName}):</span>
+                                    <span className="break-all">{publishStatus.error}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
+
+                {campaign.publishStatuses.some(ps => ps.status === 'failed' || ps.error) && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs rounded-xs space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-rose-400 text-base">⚠️</span>
+                      <p className="font-bold text-white">Live Ad Network API Dispatch Issue Detected</p>
+                    </div>
+                    <p className="text-stone-300 text-[11px] leading-relaxed">
+                      Publish failed on one or more live ad channels because the target API returned an error (e.g. missing developer token, invalid customer ID, or unconfigured scope).
+                    </p>
+                    <div className="flex items-center gap-3 pt-1">
+                      <button
+                        onClick={() => onPublish(campaign.id, { dryRun: true })}
+                        className="bg-amber-400 hover:bg-amber-300 text-black px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-xs cursor-pointer flex items-center gap-1.5 transition-colors"
+                      >
+                        ⚡ Re-Publish in Dry-Run Simulation Mode
+                      </button>
+                      <button
+                        onClick={() => onPublish(campaign.id, { dryRun: false })}
+                        className="bg-stone-800 hover:bg-stone-700 text-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-xs cursor-pointer border border-stone-700 transition-colors"
+                      >
+                        🔄 Retry Live API Dispatch
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {campaign.publishStatuses.some(ps => ps.externalId?.startsWith('DRYRUN_')) && (
                   <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs rounded-xs flex items-start gap-2.5">
